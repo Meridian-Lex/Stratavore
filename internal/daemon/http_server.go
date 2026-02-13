@@ -38,6 +38,11 @@ func NewHTTPServer(port int, handler *GRPCServer, logger *zap.Logger, cfg *confi
 	mux.HandleFunc("/api/v1/runners/get", httpServer.handleGetRunner)
 	mux.HandleFunc("/api/v1/projects/create", httpServer.handleCreateProject)
 	mux.HandleFunc("/api/v1/projects/list", httpServer.handleListProjects)
+	mux.HandleFunc("/api/v1/projects/get", httpServer.handleGetProject)
+	mux.HandleFunc("/api/v1/projects/delete", httpServer.handleDeleteProject)
+	mux.HandleFunc("/api/v1/sessions/list", httpServer.handleListSessions)
+	mux.HandleFunc("/api/v1/sessions/get", httpServer.handleGetSession)
+	mux.HandleFunc("/api/v1/metrics", httpServer.handleMetrics)
 	mux.HandleFunc("/api/v1/heartbeat", httpServer.handleHeartbeat)
 	mux.HandleFunc("/api/v1/status", httpServer.handleStatus)
 	mux.HandleFunc("/api/v1/reconcile", httpServer.handleReconcile)
@@ -259,6 +264,90 @@ func (s *HTTPServer) handleReconcile(w http.ResponseWriter, r *http.Request) {
 func (s *HTTPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
+}
+
+func (s *HTTPServer) handleGetProject(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		http.Error(w, "name required", http.StatusBadRequest)
+		return
+	}
+
+	req := &api.GetProjectRequest{Name: name}
+	resp, err := s.handler.GetProject(r.Context(), req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.respondJSON(w, resp)
+}
+
+func (s *HTTPServer) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req api.DeleteProjectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.Name == "" {
+		http.Error(w, "name required", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.handler.storage.ArchiveProject(r.Context(), req.Name); err != nil {
+		s.respondJSON(w, &api.DeleteProjectResponse{Success: false, Error: err.Error()})
+		return
+	}
+
+	s.respondJSON(w, &api.DeleteProjectResponse{Success: true})
+}
+
+func (s *HTTPServer) handleListSessions(w http.ResponseWriter, r *http.Request) {
+	project := r.URL.Query().Get("project")
+	if project == "" {
+		http.Error(w, "project required", http.StatusBadRequest)
+		return
+	}
+
+	sessions, err := s.handler.storage.GetResumableSessions(r.Context(), project)
+	if err != nil {
+		s.respondJSON(w, &api.ListSessionsResponse{Error: err.Error()})
+		return
+	}
+
+	s.respondJSON(w, &api.ListSessionsResponse{Sessions: sessions})
+}
+
+func (s *HTTPServer) handleGetSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.URL.Query().Get("session_id")
+	if sessionID == "" {
+		http.Error(w, "session_id required", http.StatusBadRequest)
+		return
+	}
+
+	session, err := s.handler.storage.GetSession(r.Context(), sessionID)
+	if err != nil {
+		s.respondJSON(w, &api.GetSessionResponse{Error: err.Error()})
+		return
+	}
+
+	s.respondJSON(w, &api.GetSessionResponse{Session: session})
+}
+
+func (s *HTTPServer) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	resp, err := s.handler.GetStatus(r.Context(), &api.GetStatusRequest{})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.respondJSON(w, resp.Metrics)
 }
 
 func (s *HTTPServer) respondJSON(w http.ResponseWriter, data interface{}) {

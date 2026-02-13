@@ -121,6 +121,14 @@ func (c *PostgresClient) GetProject(ctx context.Context, name string) (*types.Pr
 	return &project, nil
 }
 
+// ArchiveProject soft-deletes a project by setting its status to archived
+func (c *PostgresClient) ArchiveProject(ctx context.Context, name string) error {
+	_, err := c.pool.Exec(ctx, `
+		UPDATE projects SET status = $1, updated_at = NOW() WHERE name = $2
+	`, types.ProjectArchived, name)
+	return err
+}
+
 // ListProjects returns all projects
 func (c *PostgresClient) ListProjects(ctx context.Context, status string) ([]*types.Project, error) {
 	query := `

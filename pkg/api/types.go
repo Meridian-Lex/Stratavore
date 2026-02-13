@@ -2,6 +2,8 @@ package api
 
 import (
 	"time"
+
+	"github.com/meridian-lex/stratavore/pkg/types"
 )
 
 // Manually defined protobuf-compatible types
@@ -67,6 +69,18 @@ type GetStatusRequest struct{}
 
 type TriggerReconciliationRequest struct{}
 
+type DeleteProjectRequest struct {
+	Name string
+}
+
+type ListSessionsRequest struct {
+	ProjectName string
+}
+
+type GetSessionRequest struct {
+	SessionID string
+}
+
 // ===== RESPONSE TYPES =====
 
 type LaunchRunnerResponse struct {
@@ -121,6 +135,21 @@ type TriggerReconciliationResponse struct {
 	ReconciledCount  int32
 	FailedRunnerIDs  []string
 	Error            string
+}
+
+type DeleteProjectResponse struct {
+	Success bool
+	Error   string
+}
+
+type ListSessionsResponse struct {
+	Sessions []*types.Session
+	Error    string
+}
+
+type GetSessionResponse struct {
+	Session *types.Session
+	Error   string
 }
 
 // ===== MODEL TYPES =====
