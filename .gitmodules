@@ -1,0 +1,3 @@
+[submodule "lex-webui"]
+	path = lex-webui
+	url = git@github.com:Meridian-Lex/Lex-webui.git

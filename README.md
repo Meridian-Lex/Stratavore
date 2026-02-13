@@ -2,11 +2,11 @@
 
 **Layer-devouring intelligence; evokes an omnipresent orchestrator.**
 
-Stratavore is a comprehensive workspace orchestration system for AI-assisted development. It manages Claude Code sessions as first-class resources, tracks global state, enables multi-project parallel workflows, and integrates with Docker infrastructure for persistence, messaging, and observability.
+Stratavore is a comprehensive workspace orchestration system for AI-assisted development. It manages Meridian Lex sessions as first-class resources, tracks global state, enables multi-project parallel workflows, and integrates with Docker infrastructure for persistence, messaging, and observability.
 
 ## Features
 
-- **Multi-Runner Management** - Run multiple Claude Code sessions simultaneously across different projects
+- **Multi-Runner Management** - Run multiple Meridian Lex sessions simultaneously across different projects
 - IN PROGRESS **Session Resumption** - Resume work instantly from anywhere with full context preservation
 - **Global Visibility** - Always know what's running where with comprehensive dashboards
 - **State Persistence** - PostgreSQL + pgvector for reliable state and session tracking
@@ -36,10 +36,26 @@ Stratavore is a comprehensive workspace orchestration system for AI-assisted dev
    └────┬────┘ └────┬────┘ └────┬────┘
         │ │ │
    ┌────▼────┐ ┌────▼────┐ ┌────▼────┐
-   │ Claude │ │ Claude │ │ Claude │
+│ Lex │ │ Lex │ │ Lex │
    │ Code │ │ Code │ │ Code │
    └─────────┘ └─────────┘ └─────────┘
 ```
+
+## Lex WebUI
+
+The browser-based control plane for Stratavore is maintained as a git submodule at `lex-webui/`.
+
+```bash
+# Clone with submodule
+git clone --recurse-submodules git@github.com:Meridian-Lex/Stratavore.git
+
+# If already cloned without submodule
+git submodule update --init --recursive
+```
+
+The WebUI connects to the Stratavore HTTP API and gRPC daemon. See [`lex-webui/README.md`](lex-webui/README.md) for frontend setup, environment configuration, and deployment instructions.
+
+---
 
 ## Quick Start
 
@@ -53,9 +69,9 @@ Stratavore is a comprehensive workspace orchestration system for AI-assisted dev
 ### Installation
 
 ```bash
-# Clone repository
-git clone https://github.com/meridian/stratavore
-cd stratavore
+# Clone repository (include submodules for Lex WebUI)
+git clone --recurse-submodules git@github.com:Meridian-Lex/Stratavore.git
+cd Stratavore
 
 # Build binaries
 make build
@@ -145,7 +161,7 @@ stratavore kill runner_abc123
 Stratavore uses PostgreSQL with the following key tables:
 
 - **projects** - Project metadata and statistics
-- **runners** - Active and historical Claude Code instances
+- **runners** - Active and historical Meridian Lex instances
 - **sessions** - Conversation history and resumption data
 - **outbox** - Transactional outbox for reliable event delivery
 - **events** - Immutable audit log for event sourcing
@@ -338,13 +354,13 @@ MIT License - see LICENSE file for details
 
 ## Acknowledgments
 
-- Built for managing Claude Code (Anthropic)
+- Built for managing Meridian Lex ()
 - Inspired by Kubernetes and process supervisors
 - Integrates with lex-docker infrastructure
 
 ## Roadmap
 
-- [ ] Web UI for dashboard
+- [x] Web UI for dashboard (Lex WebUI submodule — see `lex-webui/`)
 - [ ] Remote runners (multi-node support)
 - [ ] Session similarity search via Qdrant
 - [ ] Auto-scaling based on load
