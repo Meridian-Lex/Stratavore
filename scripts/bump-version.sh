@@ -27,7 +27,7 @@ if [[ -z "$NEW_VERSION" ]]; then
 fi
 
 # Basic semver validation (major.minor.patch)
-if! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+if ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "Error: version must be in semver format (e.g. 1.5.0), got: $NEW_VERSION" >&2
     exit 1
 fi

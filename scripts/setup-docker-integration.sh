@@ -6,7 +6,7 @@ set -euo pipefail
 echo "==> Setting up Stratavore Docker integration"
 
 # Check if lex-docker is running
-if! docker ps | grep -q "lex-postgres"; then
+if ! docker ps | grep -q "lex-postgres"; then
     echo "ERROR: lex-docker infrastructure not running"
     echo "Start it with: cd ~/meridian-home/projects/lex-docker &&./scripts/deploy-stack.sh"
     exit 1
@@ -66,7 +66,7 @@ mkdir -p ~/.config/stratavore
 mkdir -p ~/.local/share/stratavore
 
 # Create default config if it doesn't exist
-if [! -f ~/.config/stratavore/stratavore.yaml ]; then
+if [ ! -f ~/.config/stratavore/stratavore.yaml ]; then
     cat > ~/.config/stratavore/stratavore.yaml <<'EOF'
 database:
   postgresql:
