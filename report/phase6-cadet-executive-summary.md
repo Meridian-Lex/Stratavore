@@ -116,8 +116,8 @@ Stratavore represents an enterprise-grade AI development workspace orchestrator 
 - COMPLETE Multi-Environment Configuration
 
 ### Innovation Aspects: **A**
-- **AI Workspace Specialization:** Purpose-built for Claude Code management
-- **Docker Integration:** lex-docker ecosystem integration
+- **AI Workspace Specialization:** Purpose-built for Meridian Lex management
+- **Docker Integration:** Gantry ecosystem integration
 - **pgvector Integration:** Modern AI vector database support
 - **Event Sourcing:** Immutable audit trail architecture
 
@@ -132,7 +132,7 @@ Stratavore represents an enterprise-grade AI development workspace orchestrator 
 - **Enterprise Patterns:** Transactional guarantees, scalability focus
 
 ### Unique Value Propositions
-1. **AI Development Specialization:** Purpose-built for Claude Code workflows
+1. **AI Development Specialization:** Purpose-built for Meridian Lex workflows
 2. **Enterprise-Grade Foundation:** Production-ready from day one
 3. **Developer Experience:** Comprehensive documentation and tooling
 4. **Operational Excellence:** Built-in monitoring and health checks

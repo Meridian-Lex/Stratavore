@@ -50,7 +50,7 @@ type DockerConfig struct {
 	Qdrant     QdrantConfig     `mapstructure:"qdrant"`
 }
 
-// APIGatewayConfig for lex-docker API gateway
+// APIGatewayConfig for Gantry API gateway
 type APIGatewayConfig struct {
 	Host    string `mapstructure:"host"`
 	Port    int    `mapstructure:"port"`

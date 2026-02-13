@@ -64,7 +64,7 @@ The WebUI connects to the Stratavore HTTP API and gRPC daemon. See [`stratavore-
 - Go 1.22 or later
 - PostgreSQL 14+ with pgvector extension
 - RabbitMQ 3.12+
-- Docker (for lex-docker integration)
+- Docker (for Gantry integration)
 
 ### Installation
 
@@ -76,7 +76,7 @@ cd Stratavore
 # Build binaries
 make build
 
-# Setup Docker integration (if using lex-docker)
+# Setup Docker integration (if using Gantry)
 ./scripts/setup-docker-integration.sh
 
 # Install binaries
@@ -356,7 +356,7 @@ MIT License - see LICENSE file for details
 
 - Built for managing Meridian Lex ()
 - Inspired by Kubernetes and process supervisors
-- Integrates with lex-docker infrastructure
+- Integrates with Gantry infrastructure
 
 ## Roadmap
 

@@ -33,9 +33,9 @@ ls -lh bin/
 
 ## Step 2: Setup Infrastructure
 
-### Option A: Using lex-docker (Recommended)
+### Option A: Using Gantry (Recommended)
 
-If you have lex-docker infrastructure running:
+If you have Gantry infrastructure running:
 
 ```bash
 # This script will:
@@ -141,14 +141,14 @@ stratavore projects
 ## Step 6: Launch a Runner
 
 ```bash
-# Launch Claude Code for the project
+# Launch Meridian Lex for the project
 stratavore my-awesome-project
 
 # The system will:
 # 1. Check for existing runners
 # 2. Create new runner if none exist
 # 3. Start stratavore-agent wrapper
-# 4. Launch Claude Code
+# 4. Launch Meridian Lex
 # 5. Begin heartbeat monitoring
 
 # In another terminal, check status

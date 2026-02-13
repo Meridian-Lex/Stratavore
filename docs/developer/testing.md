@@ -10,7 +10,7 @@ This guide walks you through testing Stratavore components to verify everything 
 - RabbitMQ 3.12+
 - Go 1.22+
 - protoc compiler
-- Docker (for lex-docker integration)
+- Docker (for Gantry integration)
 ```
 
 ## Setup for Testing
@@ -37,7 +37,7 @@ export PATH="$PATH:$(go env GOPATH)/bin"
 ```bash
 cd stratavore
 
-# If using lex-docker
+# If using Gantry
 ./scripts/setup-docker-integration.sh
 
 # Or manually setup PostgreSQL and RabbitMQ

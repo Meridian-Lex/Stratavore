@@ -20,7 +20,7 @@ database:
 
 # Docker infrastructure integration
 docker:
-  # API Gateway (optional, for lex-docker integration)
+  # API Gateway (optional, for Gantry integration)
   api_gateway:
     host: localhost
     port: 8000
