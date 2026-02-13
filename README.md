@@ -43,7 +43,7 @@ Stratavore is a comprehensive workspace orchestration system for AI-assisted dev
 
 ## Lex WebUI
 
-The browser-based control plane for Stratavore is maintained as a git submodule at `lex-webui/`.
+The browser-based control plane for Stratavore is maintained as a git submodule at `stratavore-ui/`.
 
 ```bash
 # Clone with submodule
@@ -53,7 +53,7 @@ git clone --recurse-submodules git@github.com:Meridian-Lex/Stratavore.git
 git submodule update --init --recursive
 ```
 
-The WebUI connects to the Stratavore HTTP API and gRPC daemon. See [`lex-webui/README.md`](lex-webui/README.md) for frontend setup, environment configuration, and deployment instructions.
+The WebUI connects to the Stratavore HTTP API and gRPC daemon. See [`stratavore-ui/README.md`](stratavore-ui/README.md) for frontend setup, environment configuration, and deployment instructions.
 
 ---
 
@@ -360,7 +360,7 @@ MIT License - see LICENSE file for details
 
 ## Roadmap
 
-- [x] Web UI for dashboard (Lex WebUI submodule — see `lex-webui/`)
+- [x] Web UI for dashboard (stratavore-ui submodule — see `stratavore-ui/`)
 - [ ] Remote runners (multi-node support)
 - [ ] Session similarity search via Qdrant
 - [ ] Auto-scaling based on load
