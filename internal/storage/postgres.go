@@ -337,7 +337,7 @@ func (c *PostgresClient) GetRunner(ctx context.Context, runnerID string) (*types
 		       status, flags, capabilities, environment, session_id, conversation_mode,
 		       tokens_used, cpu_percent, memory_mb, restart_attempts, max_restart_attempts,
 		       started_at, last_heartbeat, heartbeat_ttl_seconds, terminated_at, exit_code,
-		       created_at, updated_at
+		       created_at, updated_at, session_name
 		FROM runners WHERE id = $1
 	`
 
@@ -345,6 +345,7 @@ func (c *PostgresClient) GetRunner(ctx context.Context, runnerID string) (*types
 	var flagsJSON, capsJSON, envJSON []byte
 	var nodeID, sessionID sql.NullString
 	var conversationMode sql.NullString
+	var sessionName sql.NullString
 	var cpuPercent sql.NullFloat64
 	var memoryMB, tokensUsed sql.NullInt64
 	var lastHeartbeat, terminatedAt sql.NullTime
@@ -358,6 +359,7 @@ func (c *PostgresClient) GetRunner(ctx context.Context, runnerID string) (*types
 		&runner.RestartAttempts, &runner.MaxRestartAttempts,
 		&runner.StartedAt, &lastHeartbeat, &runner.HeartbeatTTL,
 		&terminatedAt, &exitCode, &runner.CreatedAt, &runner.UpdatedAt,
+		&sessionName,
 	)
 
 	if err != nil {
@@ -398,6 +400,9 @@ func (c *PostgresClient) GetRunner(ctx context.Context, runnerID string) (*types
 	if exitCode.Valid {
 		ec := int(exitCode.Int32)
 		runner.ExitCode = &ec
+	}
+	if sessionName.Valid {
+		runner.SessionName = sessionName.String
 	}
 
 	return &runner, nil
@@ -835,6 +840,14 @@ func (c *PostgresClient) IncrementTokenUsage(ctx context.Context, scope, scopeID
 	return err
 }
 
+
+// UpdateRunnerSessionName stores the tmux session name for a runner
+func (c *PostgresClient) UpdateRunnerSessionName(ctx context.Context, runnerID, sessionName string) error {
+	_, err := c.pool.Exec(ctx, `
+		UPDATE runners SET session_name = $1 WHERE id = $2
+	`, sessionName, runnerID)
+	return err
+}
 // GetExpiredBudgets returns budgets that need rollover
 func (c *PostgresClient) GetExpiredBudgets(ctx context.Context, now time.Time) ([]*types.TokenBudget, error) {
 	query := `

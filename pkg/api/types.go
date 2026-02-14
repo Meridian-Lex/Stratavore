@@ -167,6 +167,7 @@ type Runner struct {
 	Environment        map[string]string
 	SessionID          string
 	ConversationMode   string
+	SessionName        string
 	TokensUsed         int64
 	CPUPercent         float64
 	MemoryMB           int64

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"time"
 
@@ -49,7 +50,7 @@ var (
 func init() {
 	// Global flags
 	rootCmd.PersistentFlags().StringVar(&configFile, "config", "", "config file path")
-	rootCmd.PersistentFlags().StringVar(&flagsVar, "flags", "", "Claude Code flags")
+	rootCmd.PersistentFlags().StringVar(&flagsVar, "flags", "", "Meridian Lex flags")
 	rootCmd.PersistentFlags().BoolVar(&godMode, "god", false, "God mode (full access)")
 	rootCmd.PersistentFlags().StringVar(&preset, "preset", "", "Use preset configuration")
 	rootCmd.PersistentFlags().BoolVar(&grpc, "grpc", false, "Use gRPC client (default false)")
@@ -58,7 +59,7 @@ func init() {
 	newCmd.Flags().StringP("path", "p", "", "Project path (default: current directory)")
 	newCmd.Flags().StringP("description", "d", "", "Project description")
 
-	launchCmd.Flags().StringSliceP("flag", "f", nil, "Claude Code flags")
+	launchCmd.Flags().StringSliceP("flag", "f", nil, "Meridian Lex flags")
 	launchCmd.Flags().StringSliceP("capability", "c", nil, "Capabilities to enable")
 
 	killCmd.Flags().BoolP("force", "f", false, "Force kill (SIGKILL)")
@@ -86,7 +87,7 @@ func main() {
 var rootCmd = &cobra.Command{
 	Use:   "stratavore [project]",
 	Short: "AI Development Workspace Orchestrator",
-	Long: `Stratavore manages multiple Claude Code sessions across projects,
+	Long: `Stratavore manages multiple Meridian Lex sessions across projects,
 providing global state visibility, session resumption, and resource management.`,
 	Version: fmt.Sprintf("%s (built %s, commit %s)", Version, BuildTime, Commit),
 	Run:     rootHandler,
@@ -365,12 +366,48 @@ var runnersCmd = &cobra.Command{
 
 var attachCmd = &cobra.Command{
 	Use:   "attach <runner-id>",
-	Short: "Attach to running instance",
-	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	Short: "Attach to a running tmux session",
+	Long: `Re-attach to the tmux session wrapping a running runner.
+
+The runner must have been launched while tmux was available on the daemon host.
+Use this after an SSH disconnect to resume the session.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
 		runnerID := args[0]
-		fmt.Printf("Attaching to runner: %s\n", runnerID)
-		fmt.Println("(Attach implementation TODO - requires PTY handling)")
+		ctx := context.Background()
+
+		apiClient := getAPIClient()
+
+		resp, err := apiClient.GetRunner(ctx, runnerID)
+		if err != nil {
+			return fmt.Errorf("failed to retrieve runner: %w", err)
+		}
+		if resp.Error != "" {
+			return fmt.Errorf("runner not found: %s", resp.Error)
+		}
+		if resp.Runner == nil {
+			return fmt.Errorf("runner %s not found", runnerID)
+		}
+
+		sessionName := resp.Runner.SessionName
+		if sessionName == "" {
+			return fmt.Errorf("runner %s has no tmux session (launched without tmux or session not recorded)", runnerID)
+		}
+
+		// Verify the tmux session is still alive
+		checkCmd := exec.Command("tmux", "has-session", "-t", sessionName)
+		if err := checkCmd.Run(); err != nil {
+			return fmt.Errorf("tmux session %q not found — runner may have exited (runner status: %s)", sessionName, resp.Runner.Status)
+		}
+
+		fmt.Printf("Attaching to tmux session %q for runner %s...\n", sessionName, runnerID[:8])
+
+		// Replace current process with tmux attach — stdin/stdout/stderr pass through
+		attachExec := exec.Command("tmux", "attach-session", "-t", sessionName)
+		attachExec.Stdin = os.Stdin
+		attachExec.Stdout = os.Stdout
+		attachExec.Stderr = os.Stderr
+		return attachExec.Run()
 	},
 }
 

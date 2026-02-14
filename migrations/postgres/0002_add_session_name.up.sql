@@ -1,0 +1,1 @@
+ALTER TABLE runners ADD COLUMN IF NOT EXISTS session_name VARCHAR(128);

@@ -17,13 +17,14 @@ import (
 	"go.uber.org/zap"
 )
 
-// RunnerManager manages Claude Code runner lifecycles
+// RunnerManager manages Meridian Lex runner lifecycles
 type RunnerManager struct {
-	db            *storage.PostgresClient
-	messaging     *messaging.Client
-	logger        *zap.Logger
-	activeRunners map[string]*ManagedRunner
-	mu            sync.RWMutex
+	db             *storage.PostgresClient
+	messaging      *messaging.Client
+	logger         *zap.Logger
+	activeRunners  map[string]*ManagedRunner
+	mu             sync.RWMutex
+	tmuxAvailable  bool
 }
 
 // ManagedRunner represents an actively managed runner
@@ -40,11 +41,19 @@ func NewRunnerManager(
 	messaging *messaging.Client,
 	logger *zap.Logger,
 ) *RunnerManager {
+	_, tmuxErr := exec.LookPath("tmux")
+	tmuxAvailable := tmuxErr == nil
+	if tmuxAvailable {
+		logger.Info("tmux detected: runners will be wrapped in named sessions")
+	} else {
+		logger.Warn("tmux not found: runners will launch directly (no session persistence)")
+	}
 	return &RunnerManager{
 		db:            db,
 		messaging:     messaging,
 		logger:        logger,
 		activeRunners: make(map[string]*ManagedRunner),
+		tmuxAvailable: tmuxAvailable,
 	}
 }
 
@@ -113,10 +122,27 @@ func (rm *RunnerManager) startAgent(
 		args = append(args, "--claude-flag", flag)
 	}
 
-	// Create command with context for graceful shutdown
-	cmd, err := launchAgent(ctx, args) // This will return the command, but we need to set it up first
-	if err != nil {
-		return nil, fmt.Errorf("launch agent: %w", err)
+	// Build command — wrap in tmux session when available so the process
+	// survives SSH disconnects and can be re-attached via stratavore attach.
+	var cmd *exec.Cmd
+	var sessionName string
+
+	if rm.tmuxAvailable {
+		sessionName = "stratavore-" + runner.ID[:8]
+		// Resolve agent binary path first
+		agentPath, err := resolveAgentPath()
+		if err != nil {
+			return nil, fmt.Errorf("resolve agent path: %w", err)
+		}
+		// tmux new-session -d -s <name> -- <agentBin> <args...>
+		tmuxArgs := append([]string{"new-session", "-d", "-s", sessionName, "--", agentPath}, args...)
+		cmd = exec.CommandContext(ctx, "tmux", tmuxArgs...)
+	} else {
+		var err error
+		cmd, err = launchAgent(ctx, args)
+		if err != nil {
+			return nil, fmt.Errorf("launch agent: %w", err)
+		}
 	}
 
 	// Set up logging (could redirect to structured log files)
@@ -129,6 +155,17 @@ func (rm *RunnerManager) startAgent(
 	}
 
 	pid := cmd.Process.Pid
+
+	// If running under tmux, store the session name in the DB
+	if rm.tmuxAvailable && sessionName != "" {
+		runner.SessionName = sessionName
+		if err := rm.db.UpdateRunnerSessionName(ctx, runner.ID, sessionName); err != nil {
+			rm.logger.Warn("failed to store session name",
+				zap.String("runner_id", runner.ID),
+				zap.String("session_name", sessionName),
+				zap.Error(err))
+		}
+	}
 
 	// Update runner with runtime ID (PID)
 	if err := rm.db.UpdateRunnerRuntimeID(ctx, runner.ID, fmt.Sprintf("%d", pid)); err != nil {
@@ -151,14 +188,12 @@ func (rm *RunnerManager) startAgent(
 	return managed, nil
 }
 
-// launchAgent returns an exec.Cmd pointing to stratavore-agent
-func launchAgent(ctx context.Context, args []string) (*exec.Cmd, error) {
+// resolveAgentPath returns the path to the stratavore-agent binary
+func resolveAgentPath() (string, error) {
 	exeName := "stratavore-agent"
 	if runtime.GOOS == "windows" {
 		exeName += ".exe"
 	}
-
-	var agentPath string
 
 	// First try same directory as this executable
 	exePath, err := os.Executable()
@@ -166,15 +201,20 @@ func launchAgent(ctx context.Context, args []string) (*exec.Cmd, error) {
 		exeDir := filepath.Dir(exePath)
 		candidate := filepath.Join(exeDir, exeName)
 		if _, err := os.Stat(candidate); err == nil {
-			agentPath = candidate
+			return candidate, nil
 		}
 	}
 
-	// Fallback to PATH if not found
-	if agentPath == "" {
-		agentPath = exeName
-	}
+	// Fallback to PATH
+	return exeName, nil
+}
 
+// launchAgent returns an exec.Cmd pointing to stratavore-agent
+func launchAgent(ctx context.Context, args []string) (*exec.Cmd, error) {
+	agentPath, err := resolveAgentPath()
+	if err != nil {
+		return nil, err
+	}
 	cmd := exec.CommandContext(ctx, agentPath, args...)
 	return cmd, nil
 }
@@ -252,6 +292,15 @@ func (rm *RunnerManager) StopRunner(ctx context.Context, runnerID string) error 
 	}
 
 	rm.logger.Info("stopping runner", zap.String("runner_id", runnerID))
+
+	// Kill tmux session if present — this terminates the runner cleanly
+	if managed.Runner.SessionName != "" {
+		if err := exec.Command("tmux", "kill-session", "-t", managed.Runner.SessionName).Run(); err != nil {
+			rm.logger.Warn("failed to kill tmux session",
+				zap.String("session_name", managed.Runner.SessionName),
+				zap.Error(err))
+		}
+	}
 
 	// Signal stop
 	close(managed.StopCh)

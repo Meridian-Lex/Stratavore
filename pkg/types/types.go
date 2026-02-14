@@ -40,7 +40,7 @@ const (
 	ModeResume   ConversationMode = "resume"
 )
 
-// Runner represents a Claude Code instance
+// Runner represents a Meridian Lex instance
 type Runner struct {
 	ID           string       `json:"id"`
 	RuntimeType  RuntimeType  `json:"runtime_type"`
@@ -55,6 +55,7 @@ type Runner struct {
 	
 	SessionID        string           `json:"session_id,omitempty"`
 	ConversationMode ConversationMode `json:"conversation_mode,omitempty"`
+	SessionName      string           `json:"session_name,omitempty"`
 	
 	TokensUsed       int64   `json:"tokens_used"`
 	CPUPercent       float64 `json:"cpu_percent"`

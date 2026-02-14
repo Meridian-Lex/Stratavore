@@ -295,6 +295,7 @@ func convertRunnerToAPI(r *types.Runner) *api.Runner {
 		Environment:        r.Environment,
 		SessionID:          r.SessionID,
 		ConversationMode:   string(r.ConversationMode),
+		SessionName:        r.SessionName,
 		TokensUsed:         r.TokensUsed,
 		CPUPercent:         r.CPUPercent,
 		MemoryMB:           r.MemoryMB,
