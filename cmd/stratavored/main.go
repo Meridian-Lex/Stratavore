@@ -12,6 +12,7 @@ import (
 	"github.com/meridian-lex/stratavore/internal/messaging"
 	"github.com/meridian-lex/stratavore/internal/notifications"
 	"github.com/meridian-lex/stratavore/internal/observability"
+	"github.com/meridian-lex/stratavore/internal/session"
 	"github.com/meridian-lex/stratavore/internal/storage"
 	"github.com/meridian-lex/stratavore/pkg/config"
 	"go.uber.org/zap"
@@ -49,6 +50,16 @@ func run() error {
 		zap.String("version", Version),
 		zap.String("build_time", BuildTime),
 		zap.String("commit", Commit))
+
+	// Write PID file so 'stratavore resume' can detect us even without tmux.
+	if err := session.WritePIDFile(); err != nil {
+		logger.Warn("failed to write PID file", zap.Error(err))
+	}
+	defer func() {
+		if err := session.DeleteDaemonSession(); err != nil {
+			logger.Warn("failed to clean up session files on exit", zap.Error(err))
+		}
+	}()
 
 	// Create context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())

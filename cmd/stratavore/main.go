@@ -4,9 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
 
+	"github.com/meridian-lex/stratavore/internal/session"
 	"github.com/meridian-lex/stratavore/internal/storage"
 	"github.com/meridian-lex/stratavore/internal/ui"
 	"github.com/meridian-lex/stratavore/pkg/api"
@@ -49,7 +54,7 @@ var (
 func init() {
 	// Global flags
 	rootCmd.PersistentFlags().StringVar(&configFile, "config", "", "config file path")
-	rootCmd.PersistentFlags().StringVar(&flagsVar, "flags", "", "Claude Code flags")
+	rootCmd.PersistentFlags().StringVar(&flagsVar, "flags", "", "Meridian Lex flags")
 	rootCmd.PersistentFlags().BoolVar(&godMode, "god", false, "God mode (full access)")
 	rootCmd.PersistentFlags().StringVar(&preset, "preset", "", "Use preset configuration")
 	rootCmd.PersistentFlags().BoolVar(&grpc, "grpc", false, "Use gRPC client (default false)")
@@ -58,7 +63,7 @@ func init() {
 	newCmd.Flags().StringP("path", "p", "", "Project path (default: current directory)")
 	newCmd.Flags().StringP("description", "d", "", "Project description")
 
-	launchCmd.Flags().StringSliceP("flag", "f", nil, "Claude Code flags")
+	launchCmd.Flags().StringSliceP("flag", "f", nil, "Meridian Lex flags")
 	launchCmd.Flags().StringSliceP("capability", "c", nil, "Capabilities to enable")
 
 	killCmd.Flags().BoolP("force", "f", false, "Force kill (SIGKILL)")
@@ -73,6 +78,7 @@ func init() {
 	rootCmd.AddCommand(watchCmd)
 	rootCmd.AddCommand(attachCmd)
 	rootCmd.AddCommand(daemonCmd)
+	rootCmd.AddCommand(resumeCmd)
 	rootCmd.AddCommand(completionCmd)
 }
 
@@ -86,7 +92,7 @@ func main() {
 var rootCmd = &cobra.Command{
 	Use:   "stratavore [project]",
 	Short: "AI Development Workspace Orchestrator",
-	Long: `Stratavore manages multiple Claude Code sessions across projects,
+	Long: `Stratavore manages multiple Meridian Lex sessions across projects,
 providing global state visibility, session resumption, and resource management.`,
 	Version: fmt.Sprintf("%s (built %s, commit %s)", Version, BuildTime, Commit),
 	Run:     rootHandler,
@@ -545,21 +551,262 @@ PowerShell:
 }
 
 var daemonCmd = &cobra.Command{
-	Use:   "daemon [start|stop|status]",
-	Short: "Manage daemon",
-	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		action := args[0]
-		switch action {
+	Use:   "daemon <start|stop|status|attach>",
+	Short: "Manage the stratavored daemon",
+	Long: `Control the stratavore daemon lifecycle.
+
+  start   Launch stratavored. Wraps in a tmux session when tmux is available,
+          recording the session name and launch flags so the daemon can be
+          resumed after a disconnect.
+
+  stop    Send SIGTERM to the running daemon.
+
+  status  Show whether the daemon is running and how to reach it.
+
+  attach  Re-attach to the daemon's tmux session (same as 'stratavore resume').`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		switch args[0] {
 		case "start":
-			fmt.Println("Starting daemon...")
-			fmt.Println("(Would start stratavored)")
+			return daemonStart(cmd)
 		case "stop":
-			fmt.Println("Stopping daemon...")
+			return daemonStop()
 		case "status":
-			fmt.Println("Daemon status: Unknown")
+			return daemonStatus()
+		case "attach":
+			return daemonAttach()
 		default:
-			fmt.Printf("Unknown action: %s\n", action)
+			return fmt.Errorf("unknown action %q — use start, stop, status, or attach", args[0])
 		}
 	},
+}
+
+// daemonStart launches stratavored, optionally inside a tmux session.
+func daemonStart(cmd *cobra.Command) error {
+	// Check for an existing live session first.
+	existing, err := session.LoadDaemonSession()
+	if err == nil && existing != nil && existing.Alive() {
+		fmt.Println("Daemon is already running.")
+		if existing.SessionName != "" {
+			fmt.Printf("  Session: %s\n", existing.SessionName)
+			fmt.Printf("  Attach:  stratavore resume\n")
+		} else {
+			fmt.Printf("  PID: %d\n", session.ReadPIDFile())
+		}
+		return nil
+	}
+
+	// Collect the flags that were passed so we can replay them on resume.
+	var launchFlags []string
+	if godMode {
+		launchFlags = append(launchFlags, "--god")
+	}
+	if preset != "" {
+		launchFlags = append(launchFlags, "--preset", preset)
+	}
+	if configFile != "" {
+		launchFlags = append(launchFlags, "--config", configFile)
+	}
+
+	// Resolve stratavored binary (same dir as this binary, fallback to PATH).
+	daemonBin, err := resolveDaemonPath()
+	if err != nil {
+		return fmt.Errorf("cannot find stratavored binary: %w", err)
+	}
+
+	rec := &session.DaemonSession{
+		StartedAt:  time.Now(),
+		Flags:      launchFlags,
+		ConfigFile: configFile,
+	}
+
+	if session.TmuxAvailable() {
+		rec.SessionName = session.DaemonSessionName
+
+		// Build: tmux new-session -d -s stratavore-daemon -- stratavored [flags...]
+		tmuxArgs := []string{"new-session", "-d", "-s", rec.SessionName, "--", daemonBin}
+		// Pass through config/preset flags to stratavored if applicable.
+		if configFile != "" {
+			tmuxArgs = append(tmuxArgs, "--config", configFile)
+		}
+
+		launchCmd := exec.Command("tmux", tmuxArgs...)
+		launchCmd.Stdout = os.Stdout
+		launchCmd.Stderr = os.Stderr
+		if err := launchCmd.Run(); err != nil {
+			return fmt.Errorf("failed to launch daemon in tmux: %w", err)
+		}
+
+		if err := rec.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not save session record: %v\n", err)
+		}
+
+		fmt.Printf("Daemon started in tmux session %q.\n", rec.SessionName)
+		fmt.Printf("  Flags:  %s\n", flagSummary(launchFlags))
+		fmt.Printf("  Attach: stratavore resume\n")
+		return nil
+	}
+
+	// No tmux — launch stratavored directly in the background.
+	daemonArgs := []string{}
+	if configFile != "" {
+		daemonArgs = append(daemonArgs, "--config", configFile)
+	}
+	proc := exec.Command(daemonBin, daemonArgs...)
+	proc.Stdout = os.Stdout
+	proc.Stderr = os.Stderr
+	if err := proc.Start(); err != nil {
+		return fmt.Errorf("failed to start daemon: %w", err)
+	}
+
+	rec.PID = proc.Process.Pid
+	if err := rec.Save(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not save session record: %v\n", err)
+	}
+
+	fmt.Printf("Daemon started (PID %d). No tmux available — session will not survive disconnect.\n", proc.Process.Pid)
+	fmt.Println("Install tmux for persistent session support.")
+	return nil
+}
+
+// daemonStop sends SIGTERM to the running daemon.
+func daemonStop() error {
+	rec, err := session.LoadDaemonSession()
+	if err != nil {
+		return fmt.Errorf("load session: %w", err)
+	}
+	if rec == nil {
+		fmt.Println("No session record found. Daemon may not be running.")
+		return nil
+	}
+	if !rec.Alive() {
+		fmt.Println("Daemon is not running.")
+		session.DeleteDaemonSession()
+		return nil
+	}
+
+	// Kill tmux session — this sends SIGHUP to stratavored, triggering graceful shutdown.
+	if rec.SessionName != "" && session.TmuxSessionAlive(rec.SessionName) {
+		if err := exec.Command("tmux", "kill-session", "-t", rec.SessionName).Run(); err != nil {
+			return fmt.Errorf("kill tmux session: %w", err)
+		}
+		fmt.Printf("Daemon stopped (tmux session %q terminated).\n", rec.SessionName)
+		return nil
+	}
+
+	// No tmux — signal by PID.
+	pid := rec.PID
+	if pid == 0 {
+		pid = session.ReadPIDFile()
+	}
+	if pid == 0 {
+		return fmt.Errorf("no PID available to stop daemon")
+	}
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return fmt.Errorf("find process %d: %w", pid, err)
+	}
+	if err := p.Signal(syscall.SIGTERM); err != nil {
+		return fmt.Errorf("signal daemon: %w", err)
+	}
+	fmt.Printf("SIGTERM sent to daemon (PID %d).\n", pid)
+	return nil
+}
+
+// daemonStatus prints the current daemon state.
+func daemonStatus() error {
+	rec, err := session.LoadDaemonSession()
+	if err != nil {
+		return fmt.Errorf("load session: %w", err)
+	}
+
+	if rec == nil || !rec.Alive() {
+		fmt.Println("Daemon: not running")
+		if rec != nil {
+			fmt.Println("  (stale session record found — daemon has exited)")
+		}
+		return nil
+	}
+
+	fmt.Println("Daemon: running")
+	fmt.Printf("  Started:  %s\n", rec.StartedAt.Format(time.RFC3339))
+	if rec.SessionName != "" {
+		fmt.Printf("  Session:  %s\n", rec.SessionName)
+		fmt.Printf("  Attach:   stratavore resume\n")
+	} else {
+		pid := rec.PID
+		if pid == 0 {
+			pid = session.ReadPIDFile()
+		}
+		fmt.Printf("  PID:      %d\n", pid)
+	}
+	if len(rec.Flags) > 0 {
+		fmt.Printf("  Flags:    %s\n", strings.Join(rec.Flags, " "))
+	}
+
+	// Also ping the API if daemon is available.
+	apiClient := getAPIClient()
+	if err := apiClient.Ping(context.Background()); err == nil {
+		fmt.Println("  API:      reachable")
+	} else {
+		fmt.Println("  API:      unreachable (daemon may be starting)")
+	}
+
+	return nil
+}
+
+// daemonAttach re-attaches to the daemon's tmux session.
+func daemonAttach() error {
+	rec, err := session.LoadDaemonSession()
+	if err != nil {
+		return fmt.Errorf("load session: %w", err)
+	}
+	if rec == nil {
+		return fmt.Errorf("no session record found — start the daemon with 'stratavore daemon start'")
+	}
+	if !rec.Alive() {
+		fmt.Println("Daemon session is no longer alive.")
+		if len(rec.Flags) > 0 {
+			fmt.Printf("Relaunch with original flags: stratavore daemon start %s\n", strings.Join(rec.Flags, " "))
+		} else {
+			fmt.Println("Relaunch with: stratavore daemon start")
+		}
+		return nil
+	}
+	return rec.Attach()
+}
+
+// resumeCmd is a top-level alias for 'daemon attach'.
+var resumeCmd = &cobra.Command{
+	Use:   "resume",
+	Short: "Resume the daemon tmux session",
+	Long: `Re-attach to the running stratavored daemon's tmux session.
+
+If the daemon is not running, prints the command to relaunch it with the
+original flags (e.g. --god, --preset) that were used at last start.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return daemonAttach()
+	},
+}
+
+// resolveDaemonPath returns the path to the stratavored binary.
+func resolveDaemonPath() (string, error) {
+	// Try same directory as this binary first.
+	exePath, err := os.Executable()
+	if err == nil {
+		candidate := filepath.Join(filepath.Dir(exePath), "stratavored")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+	// Fallback to PATH.
+	return exec.LookPath("stratavored")
+}
+
+// flagSummary formats a flag list for display, or "(none)" if empty.
+func flagSummary(flags []string) string {
+	if len(flags) == 0 {
+		return "(none)"
+	}
+	return strings.Join(flags, " ")
 }
