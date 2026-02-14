@@ -109,9 +109,9 @@ func (h *FleetHandler) fetchFromGitHub(ctx context.Context) ([]api.FleetPR, erro
 			h.logger.Warn("GitHub request failed", zap.String("repo", repo), zap.Error(err))
 			continue
 		}
-		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
 			h.logger.Warn("GitHub non-200 response",
 				zap.String("repo", repo),
 				zap.Int("status", resp.StatusCode))
@@ -119,8 +119,10 @@ func (h *FleetHandler) fetchFromGitHub(ctx context.Context) ([]api.FleetPR, erro
 		}
 
 		var prs []githubPR
-		if err := json.NewDecoder(resp.Body).Decode(&prs); err != nil {
-			h.logger.Warn("failed to decode GitHub response", zap.String("repo", repo), zap.Error(err))
+		decodeErr := json.NewDecoder(resp.Body).Decode(&prs)
+		resp.Body.Close()
+		if decodeErr != nil {
+			h.logger.Warn("failed to decode GitHub response", zap.String("repo", repo), zap.Error(decodeErr))
 			continue
 		}
 
@@ -129,7 +131,15 @@ func (h *FleetHandler) fetchFromGitHub(ctx context.Context) ([]api.FleetPR, erro
 			for i, a := range pr.Assignees {
 				assignees[i] = a.Login
 			}
-			createdAt, _ := time.Parse(time.RFC3339, pr.CreatedAt)
+			createdAt, err := time.Parse(time.RFC3339, pr.CreatedAt)
+			if err != nil {
+				h.logger.Warn("failed to parse PR creation date",
+					zap.String("repo", repo),
+					zap.Int("pr_number", pr.Number),
+					zap.String("created_at", pr.CreatedAt),
+					zap.Error(err))
+				createdAt = time.Now()
+			}
 			allPRs = append(allPRs, api.FleetPR{
 				Repo:      repo,
 				Number:    pr.Number,
