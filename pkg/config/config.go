@@ -15,6 +15,7 @@ type Config struct {
 	Daemon        DaemonConfig        `mapstructure:"daemon"`
 	Observability ObservabilityConfig `mapstructure:"observability"`
 	Security      SecurityConfig      `mapstructure:"security"`
+	GitHub        GitHubConfig        `mapstructure:"github"`
 }
 
 // DatabaseConfig holds database connection settings
@@ -92,6 +93,12 @@ type QdrantConfig struct {
 	Host    string `mapstructure:"host"`
 	Port    int    `mapstructure:"port"`
 	Enabled bool   `mapstructure:"enabled"`
+}
+
+// GitHubConfig for fleet PR visibility
+type GitHubConfig struct {
+	Token      string   `mapstructure:"token"`
+	FleetRepos []string `mapstructure:"fleet_repos"`
 }
 
 // DaemonConfig for daemon-specific settings
@@ -234,6 +241,15 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("security.auth_secret", "") // empty = auth disabled
 	v.SetDefault("security.rate_limit.requests_per_minute", 300)
 	v.SetDefault("security.rate_limit.burst", 50)
+
+	// GitHub defaults
+	v.SetDefault("github.token", "")
+	v.SetDefault("github.fleet_repos", []string{
+		"Meridian-Lex/Stratavore",
+		"Meridian-Lex/Gantry",
+		"Meridian-Lex/Lex-webui",
+		"Meridian-Lex/lex-state",
+	})
 }
 
 // GetConnectionString returns PostgreSQL connection string
