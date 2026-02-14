@@ -79,6 +79,7 @@ func init() {
 	rootCmd.AddCommand(attachCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(resumeCmd)
+	rootCmd.AddCommand(fleetCmd)
 	rootCmd.AddCommand(completionCmd)
 }
 
