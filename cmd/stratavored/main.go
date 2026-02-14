@@ -129,8 +129,11 @@ func run() error {
 	// Create API handler
 	apiHandler := daemon.NewGRPCServer(runnerMgr, db, logger, cfg.Daemon.Port_GRPC)
 
+	// Create fleet handler
+	fleetHandler := daemon.NewFleetHandler(cfg.GitHub, logger)
+
 	// Start HTTP API server
-	httpServer := daemon.NewHTTPServer(cfg.Daemon.Port_HTTP, apiHandler, logger, &cfg.Security)
+	httpServer := daemon.NewHTTPServer(cfg.Daemon.Port_HTTP, apiHandler, logger, &cfg.Security, fleetHandler)
 	go func() {
 		if err := httpServer.Start(); err != nil {
 			logger.Error("HTTP API server error", zap.Error(err))

@@ -18,17 +18,19 @@ type HTTPServer struct {
 	server  *http.Server
 	handler *GRPCServer // Reuse gRPC handler logic
 	logger  *zap.Logger
+	fleet   *FleetHandler
 }
 
 // NewHTTPServer creates HTTP API server.
 // It wires JWT auth and per-client rate limiting when the corresponding
 // config values are set; both default to disabled/permissive.
-func NewHTTPServer(port int, handler *GRPCServer, logger *zap.Logger, cfg *config.SecurityConfig) *HTTPServer {
+func NewHTTPServer(port int, handler *GRPCServer, logger *zap.Logger, cfg *config.SecurityConfig, fleet *FleetHandler) *HTTPServer {
 	mux := http.NewServeMux()
 
 	httpServer := &HTTPServer{
 		handler: handler,
 		logger:  logger,
+		fleet:   fleet,
 	}
 
 	// Register routes
@@ -47,6 +49,7 @@ func NewHTTPServer(port int, handler *GRPCServer, logger *zap.Logger, cfg *confi
 	mux.HandleFunc("/api/v1/status", httpServer.handleStatus)
 	mux.HandleFunc("/api/v1/reconcile", httpServer.handleReconcile)
 	mux.HandleFunc("/api/v1/health", httpServer.handleHealth)
+	mux.HandleFunc("/api/v1/fleet/prs", httpServer.handleFleetPRs)
 
 	// Build middleware chain: rate-limit → JWT auth → mux
 	var handler_ http.Handler = mux
@@ -348,6 +351,31 @@ func (s *HTTPServer) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.respondJSON(w, resp.Metrics)
+}
+
+func (s *HTTPServer) handleFleetPRs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.fleet == nil {
+		http.Error(w, "fleet handler not configured (github.token missing?)", http.StatusServiceUnavailable)
+		return
+	}
+
+	refresh := r.URL.Query().Get("refresh") == "true"
+	prs, cachedAt, err := s.fleet.GetPRs(r.Context(), refresh)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.respondJSON(w, &api.FleetPRsResponse{
+		PRs:      prs,
+		CachedAt: cachedAt,
+		Total:    len(prs),
+	})
 }
 
 func (s *HTTPServer) respondJSON(w http.ResponseWriter, data interface{}) {
