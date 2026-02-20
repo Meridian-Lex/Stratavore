@@ -11,12 +11,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/manifoldco/promptui"
 	"github.com/meridian-lex/stratavore/internal/session"
 	"github.com/meridian-lex/stratavore/internal/storage"
 	"github.com/meridian-lex/stratavore/internal/ui"
 	"github.com/meridian-lex/stratavore/pkg/api"
 	"github.com/meridian-lex/stratavore/pkg/client"
 	"github.com/meridian-lex/stratavore/pkg/config"
+	"github.com/meridian-lex/stratavore/pkg/types"
 	"github.com/spf13/cobra"
 )
 
@@ -99,13 +101,145 @@ providing global state visibility, session resumption, and resource management.`
 func rootHandler(cmd *cobra.Command, args []string) {
 	if len(args) == 0 {
 		// Interactive launcher (TUI)
-		fmt.Println("Interactive launcher not yet implemented")
-		fmt.Println("Usage: stratavore <project-name>")
-		os.Exit(1)
+		showInteractiveLauncher()
+		return
 	}
 
+	// Smart launch with project name
 	projectName := args[0]
+	smartLaunch(projectName)
+}
 
+// showInteractiveLauncher displays the interactive TUI menu
+func showInteractiveLauncher() {
+	for {
+		fmt.Println("\nStratavore Launcher")
+		fmt.Println("──────────────────")
+		fmt.Println("")
+
+		menuItems := []string{
+			"── Context ──",
+			"Select Project",
+			"Select Project (Full Access)",
+			"New Project",
+			"",
+			"── Information ──",
+			"Projects Overview",
+			"Active Runners",
+			"State (not implemented)",
+			"Task Queue (not implemented)",
+			"",
+			"── Configuration ──",
+			"Show Config (not implemented)",
+			"Operational Mode (not implemented)",
+			"Token Budget (not implemented)",
+			"",
+			"Exit",
+		}
+
+		prompt := promptui.Select{
+			Label: "Choose action",
+			Items: menuItems,
+			Size:  20,
+			Templates: &promptui.SelectTemplates{
+				Label:    "{{ . }}",
+				Active:   "\U0001F680 {{ . | cyan }}",
+				Inactive: "  {{ . }}",
+				Selected: "\U0001F680 {{ . | green }}",
+			},
+		}
+
+		idx, result, err := prompt.Run()
+		if err != nil {
+			fmt.Printf("Prompt failed: %v\n", err)
+			return
+		}
+
+		// Skip separator rows
+		if result == "" || strings.HasPrefix(result, "──") {
+			continue
+		}
+
+		// Route selection
+		switch result {
+		case "Select Project":
+			selectProject(false)
+		case "Select Project (Full Access)":
+			selectProject(true)
+		case "New Project":
+			fmt.Print("\nProject name: ")
+			var name string
+			fmt.Scanln(&name)
+			if name != "" {
+				newCmd.Run(newCmd, []string{name})
+			}
+		case "Projects Overview":
+			projectsCmd.Run(projectsCmd, []string{})
+		case "Active Runners":
+			runnersCmd.Run(runnersCmd, []string{})
+		case "State (not implemented)", "Task Queue (not implemented)",
+		     "Show Config (not implemented)", "Operational Mode (not implemented)",
+		     "Token Budget (not implemented)":
+			fmt.Printf("\n%s - coming in Phase 2 Tier 2\n", result)
+		case "Exit":
+			fmt.Println("\nExiting Stratavore launcher.")
+			return
+		default:
+			if idx == len(menuItems)-1 {
+				return
+			}
+		}
+	}
+}
+
+// selectProject shows project picker and launches selected project
+func selectProject(godMode bool) {
+	apiClient := getAPIClient()
+	ctx := context.Background()
+
+	resp, err := apiClient.ListProjects(ctx, "")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return
+	}
+
+	if resp.Error != "" {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+		return
+	}
+
+	if len(resp.Projects) == 0 {
+		fmt.Println("\nNo projects found")
+		fmt.Println("Create one with: New Project")
+		return
+	}
+
+	projectNames := make([]string, len(resp.Projects))
+	for i, p := range resp.Projects {
+		projectNames[i] = fmt.Sprintf("%-20s [%s, %d runners]",
+			truncate(p.Name, 20), p.Status, p.ActiveRunners)
+	}
+
+	prompt := promptui.Select{
+		Label: "Select project to launch",
+		Items: projectNames,
+		Size:  10,
+	}
+
+	idx, _, err := prompt.Run()
+	if err != nil {
+		return
+	}
+
+	selectedProject := resp.Projects[idx].Name
+	fmt.Printf("\nLaunching: %s\n", selectedProject)
+
+	// Use smart launch
+	smartLaunch(selectedProject)
+}
+
+// smartLaunch implements smart launch with resume detection (Task 20 logic)
+func smartLaunch(projectName string) {
 	// Load config
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -134,25 +268,78 @@ func rootHandler(cmd *cobra.Command, args []string) {
 	}
 
 	if len(runners) == 0 {
-		// Launch new runner
+		// No runners → launch new
 		fmt.Printf("Launching new runner for project: %s\n", projectName)
 		launchNewRunner(ctx, db, projectName, cfg)
 	} else if len(runners) == 1 {
-		// Offer attach or new
-		fmt.Printf("Found 1 active runner for %s\n", projectName)
-		fmt.Printf("  Runner ID: %s (started %v)\n", runners[0].ID, runners[0].StartedAt)
-		fmt.Println("\nOptions:")
-		fmt.Println("  1. Attach to existing runner")
-		fmt.Println("  2. Launch new runner")
-		// TODO: Interactive choice
-		fmt.Println("\nAttaching to existing runner...")
+		// One runner → offer attach or new
+		showSingleRunnerChoice(runners[0], projectName, ctx, db, cfg)
 	} else {
-		// Show picker
-		fmt.Printf("Found %d active runners for %s:\n", len(runners), projectName)
-		for i, r := range runners {
-			fmt.Printf("  %d. %s (started %v)\n", i+1, r.ID, r.StartedAt)
-		}
-		// TODO: Interactive picker
+		// Multiple runners → show picker
+		showRunnerPicker(runners, projectName, ctx, db, cfg)
+	}
+}
+
+// showSingleRunnerChoice presents attach vs new options for single runner
+func showSingleRunnerChoice(runner *types.Runner, projectName string, ctx context.Context, db *storage.PostgresClient, cfg *config.Config) {
+	fmt.Printf("\nFound 1 active runner for %s\n", projectName)
+	fmt.Printf("  Runner ID: %s (started %v)\n", runner.ID, runner.StartedAt)
+
+	options := []string{
+		"Attach to existing runner",
+		"Launch new runner",
+	}
+
+	prompt := promptui.Select{
+		Label: "Choose action",
+		Items: options,
+	}
+
+	idx, _, err := prompt.Run()
+	if err != nil {
+		return
+	}
+
+	if idx == 0 {
+		// Attach
+		attachCmd.Run(attachCmd, []string{runner.ID})
+	} else {
+		// Launch new
+		fmt.Printf("Launching new runner for project: %s\n", projectName)
+		launchNewRunner(ctx, db, projectName, cfg)
+	}
+}
+
+// showRunnerPicker shows multi-runner picker (Task 22 implementation)
+func showRunnerPicker(runners []*types.Runner, projectName string, ctx context.Context, db *storage.PostgresClient, cfg *config.Config) {
+	fmt.Printf("\nFound %d active runners for %s:\n", len(runners), projectName)
+
+	runnerLabels := make([]string, len(runners)+1)
+	for i, r := range runners {
+		uptime := time.Since(r.StartedAt).Round(time.Second)
+		runnerLabels[i] = fmt.Sprintf("%s (started %v ago)",
+			truncate(r.ID, 30), uptime)
+	}
+	runnerLabels[len(runners)] = "Launch new runner"
+
+	prompt := promptui.Select{
+		Label: "Select runner to attach or launch new",
+		Items: runnerLabels,
+		Size:  10,
+	}
+
+	idx, _, err := prompt.Run()
+	if err != nil {
+		return
+	}
+
+	if idx == len(runners) {
+		// Launch new
+		fmt.Printf("Launching new runner for project: %s\n", projectName)
+		launchNewRunner(ctx, db, projectName, cfg)
+	} else {
+		// Attach to selected
+		attachCmd.Run(attachCmd, []string{runners[idx].ID})
 	}
 }
 
