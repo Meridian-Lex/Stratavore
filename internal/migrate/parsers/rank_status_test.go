@@ -227,8 +227,7 @@ func TestParseRankStatus_RealWorldExample(t *testing.T) {
     {
       "date": "2026-02-12",
       "achievement": "Clean Stratavore acquisition",
-      // IDENTITY-EXCEPTION: functional internal reference — not for public exposure
-      "details": "Forked, configured remotes, authored CLAUDE.md",
+      "details": "Forked, configured remotes, authored project documentation",
       "awarded_by": "Fleet Admiral Lunar Laurus",
       "points": 1
     }

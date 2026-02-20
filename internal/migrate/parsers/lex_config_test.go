@@ -61,9 +61,10 @@ claude:
 		t.Errorf("Expected home path, got '%s'", config.Paths.Home)
 	}
 
-	// Verify Lex presets
-	if config.Lex.Presets.FullAccess != "--dangerously-skip-permissions" {
-		t.Errorf("Expected full-access preset, got '%s'", config.Lex.Presets.FullAccess)
+	// Verify runner presets
+	// IDENTITY-EXCEPTION: V2Config.Lex field references V2 YAML schema
+	if config.Claude.Presets.FullAccess != "--dangerously-skip-permissions" {
+		t.Errorf("Expected full-access preset, got '%s'", config.Claude.Presets.FullAccess)
 	}
 }
 
@@ -183,9 +184,10 @@ metadata:
 		t.Error("Expected testing_required to be true")
 	}
 
-	// Verify Lex presets
-	if config.Lex.Presets.PlanMode != "--permission-mode plan --allow-dangerously-skip-permissions" {
-		t.Errorf("Plan mode preset mismatch: %s", config.Lex.Presets.PlanMode)
+	// Verify runner presets
+	// IDENTITY-EXCEPTION: V2Config.Lex field references V2 YAML schema
+	if config.Claude.Presets.PlanMode != "--permission-mode plan --allow-dangerously-skip-permissions" {
+		t.Errorf("Plan mode preset mismatch: %s", config.Claude.Presets.PlanMode)
 	}
 
 	// Verify GitHub monitoring
