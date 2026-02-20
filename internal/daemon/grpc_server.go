@@ -279,6 +279,16 @@ func (s *GRPCServer) TriggerReconciliation(ctx context.Context, req *api.Trigger
 	}, nil
 }
 
+// GetTokens returns token usage metrics
+func (s *GRPCServer) GetTokens(ctx context.Context, req *api.GetTokensRequest) (*api.GetTokensResponse, error) {
+	return &api.GetTokensResponse{
+		TotalTokensUsed: 0,
+		TokensByProject: make(map[string]int64),
+		DailyLimit:      0,
+		UsagePercentage: 0,
+	}, nil
+}
+
 // Helper functions to convert between types
 
 func convertRunnerToAPI(r *types.Runner) *api.Runner {

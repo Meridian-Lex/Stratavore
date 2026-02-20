@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -1021,6 +1022,63 @@ PowerShell:
 	},
 }
 
+var tokensCmd = &cobra.Command{
+	Use:   "tokens",
+	Short: "Display token usage metrics",
+	Long: `Show token usage across all projects.
+
+Displays total tokens used, daily limit, and per-project breakdown.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		apiClient := getAPIClient()
+		ctx := context.Background()
+
+		// Check if daemon is running
+		if err := apiClient.Ping(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: Daemon not running. Start with: stratavored\n")
+			os.Exit(1)
+		}
+
+		resp, err := apiClient.GetTokens(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		if resp.Error != "" {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+			os.Exit(1)
+		}
+
+		// Display token usage
+		fmt.Println("Token Usage")
+		fmt.Println("═══════════")
+
+		fmt.Printf("Total Used: %s\n", formatNumber(resp.TotalTokensUsed))
+		fmt.Printf("Daily Limit: %s\n", formatNumber(resp.DailyLimit))
+
+		// Display usage percentage
+		usageStatus := "normal"
+		if resp.UsagePercentage > 100 {
+			usageStatus = "over limit"
+		}
+		fmt.Printf("Usage: %.1f%% (%s)\n", resp.UsagePercentage, usageStatus)
+
+		if len(resp.TokensByProject) > 0 {
+			fmt.Println("\nBy Project:")
+			// Sort projects by name for consistent output
+			var projects []string
+			for p := range resp.TokensByProject {
+				projects = append(projects, p)
+			}
+			sort.Strings(projects)
+
+			for _, p := range projects {
+				fmt.Printf("  %-20s %s\n", truncate(p, 20), formatNumber(resp.TokensByProject[p]))
+			}
+		}
+	},
+}
+
 var daemonCmd = &cobra.Command{
 	Use:   "daemon <start|stop|status|attach>",
 	Short: "Manage the stratavored daemon",
@@ -1453,6 +1511,51 @@ in conversation_mode="resume" to pick up where you left off.`,
 		fmt.Printf("  Status: %s\n", runnerResp.Runner.Status)
 		fmt.Printf("  Mode: resume\n")
 		fmt.Printf("\nUse 'stratavore watch %s' to monitor\n", projectName)
+	},
+}
+
+var stateCmd = &cobra.Command{
+	Use:   "state",
+	Short: "Display daemon and resource state",
+	Long: `Display the current operational state of the Stratavore daemon.
+
+Shows daemon status, operational mode, resource counts, and uptime.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		apiClient := getAPIClient()
+		ctx := context.Background()
+
+		// Check if daemon is running
+		if err := apiClient.Ping(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: Daemon not running. Start with: stratavored\n")
+			os.Exit(1)
+		}
+
+		// Get state
+		resp, err := apiClient.GetState(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		if resp.Error != "" {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+			os.Exit(1)
+		}
+
+		// Display in formatted table
+		fmt.Println()
+		fmt.Println("Stratavore State")
+		fmt.Println("════════════════════════════════════════════")
+		fmt.Printf("Operational Mode: %s\n", resp.OperationalMode)
+		fmt.Printf("Daemon Status:    %s\n", resp.DaemonStatus)
+		fmt.Printf("Uptime:           %s\n", resp.Uptime)
+		fmt.Println()
+		fmt.Println("Resources:")
+		fmt.Printf("  Active Runners:  %d\n", resp.ActiveRunners)
+		fmt.Printf("  Total Projects:  %d\n", resp.TotalProjects)
+		fmt.Printf("  Total Sessions:  %d\n", resp.TotalSessions)
+		fmt.Printf("  Tokens Used:     %s\n", formatNumber(resp.TokensUsed))
+		fmt.Println()
 	},
 }
 
