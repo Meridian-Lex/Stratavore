@@ -18,6 +18,9 @@ CREATE TABLE IF NOT EXISTS rank_tracking (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Unique constraint to prevent duplicate events during sync
+CREATE UNIQUE INDEX idx_rank_tracking_unique_event ON rank_tracking(event_type, event_date, COALESCE(description, ''));
+
 CREATE INDEX idx_rank_tracking_event_date ON rank_tracking(event_date DESC);
 CREATE INDEX idx_rank_tracking_event_type ON rank_tracking(event_type);
 CREATE INDEX idx_rank_tracking_current_rank ON rank_tracking(current_rank);

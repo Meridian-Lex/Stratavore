@@ -12,12 +12,15 @@ import (
 
 // ImportRank imports V2 rank tracking data into the rank_tracking table
 // Returns the number of rank events imported
+// Idempotent: Uses ON CONFLICT DO NOTHING to safely handle repeated syncs
 func ImportRank(ctx context.Context, tx pgx.Tx, rankStatus *parsers.V2RankStatusFile) (int, error) {
 	query := `
 		INSERT INTO rank_tracking (
 			current_rank, progress, strikes, commendations,
 			event_type, event_date, description, evidence, metadata
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT (event_type, event_date, COALESCE(description, ''))
+		DO NOTHING
 	`
 
 	// Get all rank events (strikes, commendations, promotions, demotions)
