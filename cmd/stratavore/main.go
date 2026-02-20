@@ -369,12 +369,49 @@ var runnersCmd = &cobra.Command{
 
 var attachCmd = &cobra.Command{
 	Use:   "attach <runner-id>",
-	Short: "Attach to running instance",
+	Short: "Attach to running instance via tmux",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		runnerID := args[0]
-		fmt.Printf("Attaching to runner: %s\n", runnerID)
-		fmt.Println("(Attach implementation TODO - requires PTY handling)")
+		apiClient := getAPIClient()
+		ctx := context.Background()
+
+		// Get runner details
+		resp, err := apiClient.GetRunner(ctx, runnerID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error getting runner: %v\n", err)
+			os.Exit(1)
+		}
+
+		if resp.Error != "" {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+			os.Exit(1)
+		}
+
+		if resp.Runner == nil {
+			fmt.Fprintf(os.Stderr, "Runner not found: %s\n", runnerID)
+			os.Exit(1)
+		}
+
+		// Extract tmux session from environment
+		tmuxSession, ok := resp.Runner.Environment["tmux_session"]
+		if !ok || tmuxSession == "" {
+			fmt.Fprintf(os.Stderr, "Runner %s does not have a tmux session configured\n", runnerID)
+			fmt.Fprintf(os.Stderr, "Environment: %v\n", resp.Runner.Environment)
+			os.Exit(1)
+		}
+
+		// Attach to tmux session
+		fmt.Printf("Attaching to tmux session: %s\n", tmuxSession)
+		attachCmd := exec.Command("tmux", "attach", "-t", tmuxSession)
+		attachCmd.Stdin = os.Stdin
+		attachCmd.Stdout = os.Stdout
+		attachCmd.Stderr = os.Stderr
+
+		if err := attachCmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error attaching to tmux: %v\n", err)
+			os.Exit(1)
+		}
 	},
 }
 
