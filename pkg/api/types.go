@@ -229,3 +229,51 @@ func ParseTime(s string) (time.Time, error) {
 	}
 	return time.Parse(time.RFC3339, s)
 }
+
+// ===== Sprint API types =====
+
+type CreateSprintRequest struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	ProjectName string   `json:"project_name,omitempty"`
+	CreatedBy   string   `json:"created_by,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+}
+
+type CreateSprintResponse struct {
+	SprintID string `json:"sprint_id"`
+}
+
+type AddSprintTaskRequest struct {
+	SprintID       string   `json:"sprint_id"`
+	SequenceNumber int      `json:"sequence_number"`
+	DependsOn      []string `json:"depends_on,omitempty"`
+	Name           string   `json:"name"`
+	Description    string   `json:"description,omitempty"`
+	ModelName      string   `json:"model_name"`
+	SystemPrompt   string   `json:"system_prompt,omitempty"`
+	UserPrompt     string   `json:"user_prompt"`
+	MaxTokens      int      `json:"max_tokens,omitempty"`
+	Temperature    float64  `json:"temperature,omitempty"`
+}
+
+type UpdateSprintStatusRequest struct {
+	SprintID string `json:"sprint_id"`
+	Status   string `json:"status"`
+}
+
+type UpdateTaskResultRequest struct {
+	TaskID        string                 `json:"task_id"`
+	Status        string                 `json:"status"`
+	ResultSummary string                 `json:"result_summary,omitempty"`
+	ResultData    map[string]interface{} `json:"result_data,omitempty"`
+	TokensInput   int64                  `json:"tokens_input,omitempty"`
+	TokensOutput  int64                  `json:"tokens_output,omitempty"`
+	CostUSD       float64                `json:"cost_usd,omitempty"`
+	ErrorMessage  string                 `json:"error_message,omitempty"`
+}
+
+type UpdateModelRequest struct {
+	Enabled *bool                  `json:"enabled,omitempty"`
+	Config  map[string]interface{} `json:"config,omitempty"`
+}
