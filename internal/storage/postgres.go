@@ -1333,3 +1333,93 @@ func (c *PostgresClient) SetOperationalMode(ctx context.Context, mode, descripti
 
 	return err
 }
+
+// ListAllSessions returns all sessions across all projects with their token usage
+func (c *PostgresClient) ListAllSessions(ctx context.Context) ([]*types.Session, error) {
+	query := `
+		SELECT id, runner_id, project_name, started_at, last_message_at,
+		       message_count, tokens_used, summary, created_at
+		FROM sessions
+		ORDER BY started_at DESC
+	`
+
+	rows, err := c.pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sessions []*types.Session
+	for rows.Next() {
+		var s types.Session
+		var lastMessageAt sql.NullTime
+		var summary sql.NullString
+
+		err := rows.Scan(
+			&s.ID,
+			&s.RunnerID,
+			&s.ProjectName,
+			&s.StartedAt,
+			&lastMessageAt,
+			&s.MessageCount,
+			&s.TokensUsed,
+			&summary,
+			&s.CreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		if lastMessageAt.Valid {
+			s.LastMessageAt = &lastMessageAt.Time
+		}
+		if summary.Valid {
+			s.Summary = summary.String
+		}
+
+		sessions = append(sessions, &s)
+	}
+
+	return sessions, rows.Err()
+}
+
+// GetDailyTokenBudget retrieves the current daily token budget
+func (c *PostgresClient) GetDailyTokenBudget(ctx context.Context) (*types.TokenBudget, error) {
+	query := `
+		SELECT id, scope, scope_id, limit_tokens, used_tokens,
+		       period_granularity, period_start, period_end
+		FROM token_budgets
+		WHERE scope = 'global'
+		  AND period_granularity = 'daily'
+		  AND period_end > NOW()
+		ORDER BY period_start DESC
+		LIMIT 1
+	`
+
+	var budget types.TokenBudget
+	var scopeIDVal sql.NullString
+
+	err := c.pool.QueryRow(ctx, query).Scan(
+		&budget.ID,
+		&budget.Scope,
+		&scopeIDVal,
+		&budget.LimitTokens,
+		&budget.UsedTokens,
+		&budget.PeriodGranularity,
+		&budget.PeriodStart,
+		&budget.PeriodEnd,
+	)
+
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil // No budget configured
+		}
+		return nil, err
+	}
+
+	if scopeIDVal.Valid {
+		budget.ScopeID = scopeIDVal.String
+	}
+
+	return &budget, nil
+}
