@@ -73,6 +73,7 @@ func init() {
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(killCmd)
 	rootCmd.AddCommand(runnersCmd)
+	rootCmd.AddCommand(tasksCmd)
 	rootCmd.AddCommand(projectsCmd)
 	rootCmd.AddCommand(watchCmd)
 	rootCmd.AddCommand(attachCmd)
@@ -555,6 +556,82 @@ var runnersCmd = &cobra.Command{
 				r.CPUPercent,
 				r.MemoryMB)
 		}
+	},
+}
+
+var tasksCmd = &cobra.Command{
+	Use:   "tasks [project]",
+	Short: "Display session queue (task list)",
+	Run: func(cmd *cobra.Command, args []string) {
+		apiClient := getAPIClient()
+		ctx := context.Background()
+
+		projectName := ""
+		if len(args) > 0 {
+			projectName = args[0]
+		}
+
+		resp, err := apiClient.ListSessions(ctx, projectName)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		if resp.Error != "" {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+			os.Exit(1)
+		}
+
+		if len(resp.Sessions) == 0 {
+			if projectName != "" {
+				fmt.Printf("No sessions found for project: %s\n", projectName)
+			} else {
+				fmt.Println("No sessions found")
+			}
+			return
+		}
+
+		fmt.Printf("Sessions (%d):\n\n", len(resp.Sessions))
+		fmt.Println("ID        PROJECT              STATUS    STARTED              DURATION   TOKENS     SUMMARY")
+		fmt.Println("──────────────────────────────────────────────────────────────────────────────────────────────────────────")
+
+		for _, s := range resp.Sessions {
+			// Calculate status
+			status := "active"
+			if s.EndedAt != nil {
+				status = "complete"
+			}
+
+			// Calculate duration
+			var duration string
+			if s.EndedAt != nil {
+				dur := s.EndedAt.Sub(s.StartedAt)
+				duration = formatDuration(dur)
+			} else {
+				dur := time.Since(s.StartedAt)
+				duration = formatDuration(dur) + "*"
+			}
+
+			// Format started time
+			startedStr := s.StartedAt.Format("2006-01-02 15:04")
+
+			// Truncate summary
+			summary := truncate(s.Summary, 40)
+			if summary == "" {
+				summary = "-"
+			}
+
+			fmt.Printf("%-8s  %-20s %-9s %-20s %-10s %-10s %s\n",
+				truncate(s.ID, 8),
+				truncate(s.ProjectName, 20),
+				status,
+				startedStr,
+				duration,
+				formatNumber(s.TokensUsed),
+				summary)
+		}
+
+		fmt.Println("\n* = active (duration still accumulating)")
 	},
 }
 
