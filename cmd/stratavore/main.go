@@ -74,6 +74,7 @@ func init() {
 	rootCmd.AddCommand(killCmd)
 	rootCmd.AddCommand(runnersCmd)
 	rootCmd.AddCommand(tasksCmd)
+	rootCmd.AddCommand(modeCmd)
 	rootCmd.AddCommand(projectsCmd)
 	rootCmd.AddCommand(watchCmd)
 	rootCmd.AddCommand(attachCmd)
@@ -632,6 +633,86 @@ var tasksCmd = &cobra.Command{
 		}
 
 		fmt.Println("\n* = active (duration still accumulating)")
+	},
+}
+
+var modeCmd = &cobra.Command{
+	Use:   "mode [get|set]",
+	Short: "Manage operational mode",
+	Long: `Get or set the operational mode.
+
+Modes:
+  IDLE           - Default state, awaiting instructions
+  AUTONOMOUS     - Self-directed operation within defined parameters
+  DIRECTED       - Following explicit instructions from commander
+  COLLABORATIVE  - Interactive partnership mode
+
+Usage:
+  stratavore mode              Show current mode
+  stratavore mode get          Show current mode
+  stratavore mode set <MODE>   Set new operational mode`,
+	Run: func(cmd *cobra.Command, args []string) {
+		if len(args) == 0 || args[0] == "get" {
+			// Get mode
+			apiClient := getAPIClient()
+			ctx := context.Background()
+
+			resp, err := apiClient.GetMode(ctx)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+
+			if resp.Error != "" {
+				fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+				os.Exit(1)
+			}
+
+			fmt.Printf("Operational Mode: %s\n", resp.Mode)
+			if resp.Description != "" {
+				fmt.Printf("Description: %s\n", resp.Description)
+			}
+		} else if args[0] == "set" {
+			if len(args) < 2 {
+				fmt.Fprintf(os.Stderr, "Error: mode required\n")
+				fmt.Fprintf(os.Stderr, "Usage: stratavore mode set <MODE> [description]\n")
+				os.Exit(1)
+			}
+
+			mode := args[1]
+			description := ""
+			if len(args) > 2 {
+				description = strings.Join(args[2:], " ")
+			}
+
+			apiClient := getAPIClient()
+			ctx := context.Background()
+
+			resp, err := apiClient.SetMode(ctx, mode, description)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+
+			if resp.Error != "" {
+				fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+				os.Exit(1)
+			}
+
+			if resp.Success {
+				fmt.Printf("Operational mode set to: %s\n", resp.Mode)
+				if description != "" {
+					fmt.Printf("Description: %s\n", description)
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "Failed to set mode\n")
+				os.Exit(1)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "Unknown subcommand: %s\n", args[0])
+			fmt.Fprintf(os.Stderr, "Use 'stratavore mode get' or 'stratavore mode set <MODE>'\n")
+			os.Exit(1)
+		}
 	},
 }
 
