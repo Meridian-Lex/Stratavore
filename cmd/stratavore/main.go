@@ -81,6 +81,9 @@ func init() {
 	rootCmd.AddCommand(continueCmd)
 	rootCmd.AddCommand(fleetCmd)
 	rootCmd.AddCommand(completionCmd)
+
+	// Register projects sub-commands
+	projectsCmd.AddCommand(projectsDeleteCmd)
 }
 
 func main() {
@@ -638,6 +641,48 @@ var projectsCmd = &cobra.Command{
 				p.ActiveRunners,
 				p.TotalSessions,
 				formatNumber(p.TotalTokens))
+		}
+	},
+}
+
+var projectsDeleteCmd = &cobra.Command{
+	Use:   "delete <project-name>",
+	Short: "Delete a project",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		projectName := args[0]
+
+		// Confirmation prompt
+		prompt := promptui.Prompt{
+			Label:     fmt.Sprintf("Delete project '%s'? This cannot be undone", projectName),
+			IsConfirm: true,
+		}
+
+		result, err := prompt.Run()
+		if err != nil || result != "y" {
+			fmt.Println("Deletion cancelled")
+			return
+		}
+
+		apiClient := getAPIClient()
+		ctx := context.Background()
+
+		resp, err := apiClient.DeleteProject(ctx, projectName)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		if resp.Error != "" {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+			os.Exit(1)
+		}
+
+		if resp.Success {
+			fmt.Printf("Project '%s' deleted successfully\n", projectName)
+		} else {
+			fmt.Fprintf(os.Stderr, "Failed to delete project\n")
+			os.Exit(1)
 		}
 	},
 }

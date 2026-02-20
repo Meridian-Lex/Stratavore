@@ -89,6 +89,16 @@ func (c *Client) ListProjects(ctx context.Context, status string) (*api.ListProj
 	return &resp, err
 }
 
+// DeleteProject deletes a project
+func (c *Client) DeleteProject(ctx context.Context, projectName string) (*api.DeleteProjectResponse, error) {
+	req := &api.DeleteProjectRequest{
+		Name: projectName,
+	}
+	var resp api.DeleteProjectResponse
+	err := c.post(ctx, "/projects/delete", req, &resp)
+	return &resp, err
+}
+
 // SendHeartbeat sends heartbeat from agent
 func (c *Client) SendHeartbeat(ctx context.Context, req *api.HeartbeatRequest) (*api.HeartbeatResponse, error) {
 	var resp api.HeartbeatResponse
