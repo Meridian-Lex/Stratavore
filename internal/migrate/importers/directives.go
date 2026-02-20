@@ -11,7 +11,8 @@ import (
 )
 
 // ImportDirectives imports V2 behavioral directives into the directives table
-func ImportDirectives(ctx context.Context, tx pgx.Tx, v2Directives []parsers.V2Directive) error {
+// Returns the number of directives imported
+func ImportDirectives(ctx context.Context, tx pgx.Tx, v2Directives []parsers.V2Directive) (int, error) {
 	query := `
 		INSERT INTO directives (
 			id, severity, trigger_condition, action, directive_text,
@@ -27,11 +28,12 @@ func ImportDirectives(ctx context.Context, tx pgx.Tx, v2Directives []parsers.V2D
 			updated_at = NOW()
 	`
 
+	count := 0
 	for _, directive := range v2Directives {
 		// Convert action map to JSONB
 		actionJSON, err := json.Marshal(directive.Action)
 		if err != nil {
-			return fmt.Errorf("marshal action for directive %s: %w", directive.ID, err)
+			return count, fmt.Errorf("marshal action for directive %s: %w", directive.ID, err)
 		}
 
 		// Parse timestamp (may be empty for some directives)
@@ -62,9 +64,10 @@ func ImportDirectives(ctx context.Context, tx pgx.Tx, v2Directives []parsers.V2D
 		)
 
 		if err != nil {
-			return fmt.Errorf("import directive %s: %w", directive.ID, err)
+			return count, fmt.Errorf("import directive %s: %w", directive.ID, err)
 		}
+		count++
 	}
 
-	return nil
+	return count, nil
 }

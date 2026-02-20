@@ -11,7 +11,8 @@ import (
 )
 
 // ImportRank imports V2 rank tracking data into the rank_tracking table
-func ImportRank(ctx context.Context, tx pgx.Tx, rankStatus *parsers.V2RankStatusFile) error {
+// Returns the number of rank events imported
+func ImportRank(ctx context.Context, tx pgx.Tx, rankStatus *parsers.V2RankStatusFile) (int, error) {
 	query := `
 		INSERT INTO rank_tracking (
 			current_rank, progress, strikes, commendations,
@@ -22,6 +23,7 @@ func ImportRank(ctx context.Context, tx pgx.Tx, rankStatus *parsers.V2RankStatus
 	// Get all rank events (strikes, commendations, promotions, demotions)
 	events := rankStatus.GetRankEvents()
 
+	count := 0
 	for _, event := range events {
 		// Extract progress from rankStatus (e.g., "2/5")
 		progress := rankStatus.ProgressTowardNext
@@ -44,8 +46,9 @@ func ImportRank(ctx context.Context, tx pgx.Tx, rankStatus *parsers.V2RankStatus
 		)
 
 		if err != nil {
-			return fmt.Errorf("import rank event %s: %w", event.Type, err)
+			return count, fmt.Errorf("import rank event %s: %w", event.Type, err)
 		}
+		count++
 	}
 
 	// Also import the current state as an "initial" event if no events exist
@@ -68,11 +71,12 @@ func ImportRank(ctx context.Context, tx pgx.Tx, rankStatus *parsers.V2RankStatus
 		)
 
 		if err != nil {
-			return fmt.Errorf("import current rank state: %w", err)
+			return count, fmt.Errorf("import current rank state: %w", err)
 		}
+		count++
 	}
 
-	return nil
+	return count, nil
 }
 
 // parseProgress extracts numeric progress from "2/5" format
@@ -93,4 +97,22 @@ func parseProgress(progressStr string) (current int, total int, err error) {
 	}
 
 	return current, total, nil
+}
+
+// ImportRankAndDirectives imports both rank tracking and directives in one call
+// Returns (rank_events_count, directives_count, error)
+func ImportRankAndDirectives(ctx context.Context, tx pgx.Tx, rankStatus *parsers.V2RankStatusFile, directives []parsers.V2Directive) (int, int, error) {
+	// Import rank tracking
+	rankCount, err := ImportRank(ctx, tx, rankStatus)
+	if err != nil {
+		return 0, 0, fmt.Errorf("import rank: %w", err)
+	}
+
+	// Import directives
+	directivesCount, err := ImportDirectives(ctx, tx, directives)
+	if err != nil {
+		return rankCount, 0, fmt.Errorf("import directives: %w", err)
+	}
+
+	return rankCount, directivesCount, nil
 }
