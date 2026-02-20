@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/meridian-lex/stratavore/internal/auth"
 	"github.com/meridian-lex/stratavore/pkg/api"
 	"github.com/meridian-lex/stratavore/pkg/config"
+	"github.com/meridian-lex/stratavore/pkg/types"
 	"go.uber.org/zap"
 )
 
@@ -50,6 +52,17 @@ func NewHTTPServer(port int, handler *GRPCServer, logger *zap.Logger, cfg *confi
 	mux.HandleFunc("/api/v1/reconcile", httpServer.handleReconcile)
 	mux.HandleFunc("/api/v1/health", httpServer.handleHealth)
 	mux.HandleFunc("/api/v1/fleet/prs", httpServer.handleFleetPRs)
+
+	// Sprint management
+	mux.HandleFunc("/api/v1/sprints/create", httpServer.handleCreateSprint)
+	mux.HandleFunc("/api/v1/sprints/list", httpServer.handleListSprints)
+	mux.HandleFunc("/api/v1/sprints/get", httpServer.handleGetSprint)
+	mux.HandleFunc("/api/v1/sprints/task/add", httpServer.handleAddSprintTask)
+	mux.HandleFunc("/api/v1/sprints/status", httpServer.handleUpdateSprintStatus)
+	mux.HandleFunc("/api/v1/tasks/result", httpServer.handleUpdateTaskResult)
+	// Model registry
+	mux.HandleFunc("/api/v1/models", httpServer.handleListModels)
+	mux.HandleFunc("/api/v1/models/", httpServer.handleUpdateModel)
 
 	// Build middleware chain: rate-limit → JWT auth → mux
 	var handler_ http.Handler = mux
@@ -381,4 +394,263 @@ func (s *HTTPServer) handleFleetPRs(w http.ResponseWriter, r *http.Request) {
 func (s *HTTPServer) respondJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
+}
+
+// ===== Sprint Management Handlers =====
+
+func (s *HTTPServer) handleCreateSprint(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req api.CreateSprintRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.Name == "" {
+		http.Error(w, "name required", http.StatusBadRequest)
+		return
+	}
+
+	// Map API request to types.Sprint
+	sprint := &types.Sprint{
+		ID:          uuid.New().String(),
+		Name:        req.Name,
+		Description: req.Description,
+		ProjectName: req.ProjectName,
+		CreatedBy:   req.CreatedBy,
+		Tags:        req.Tags,
+		Status:      types.SprintPending,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	if err := s.handler.storage.CreateSprint(r.Context(), sprint); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.respondJSON(w, &api.CreateSprintResponse{SprintID: sprint.ID})
+}
+
+func (s *HTTPServer) handleListSprints(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	projectName := r.URL.Query().Get("project_name")
+	status := r.URL.Query().Get("status")
+
+	sprints, err := s.handler.storage.ListSprints(r.Context(), projectName, status)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.respondJSON(w, sprints)
+}
+
+func (s *HTTPServer) handleGetSprint(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	sprintID := r.URL.Query().Get("sprint_id")
+	if sprintID == "" {
+		http.Error(w, "sprint_id required", http.StatusBadRequest)
+		return
+	}
+
+	includeTasks := r.URL.Query().Get("include_tasks") == "true"
+
+	sprint, err := s.handler.storage.GetSprint(r.Context(), sprintID, includeTasks)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.respondJSON(w, sprint)
+}
+
+func (s *HTTPServer) handleAddSprintTask(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req api.AddSprintTaskRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.SprintID == "" {
+		http.Error(w, "sprint_id required", http.StatusBadRequest)
+		return
+	}
+
+	if req.ModelName == "" {
+		http.Error(w, "model_name required", http.StatusBadRequest)
+		return
+	}
+
+	if req.UserPrompt == "" {
+		http.Error(w, "user_prompt required", http.StatusBadRequest)
+		return
+	}
+
+	// Map API request to types.SprintTask
+	task := &types.SprintTask{
+		ID:             uuid.New().String(),
+		SprintID:       req.SprintID,
+		SequenceNumber: req.SequenceNumber,
+		DependsOn:      req.DependsOn,
+		Name:           req.Name,
+		Description:    req.Description,
+		ModelName:      req.ModelName,
+		SystemPrompt:   req.SystemPrompt,
+		UserPrompt:     req.UserPrompt,
+		MaxTokens:      req.MaxTokens,
+		Temperature:    req.Temperature,
+		Status:         types.TaskPending,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+
+	if task.MaxTokens <= 0 {
+		task.MaxTokens = 2048
+	}
+	if task.Temperature < 0 {
+		task.Temperature = 0.7
+	}
+
+	if err := s.handler.storage.AddSprintTask(r.Context(), task); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.respondJSON(w, map[string]string{"task_id": task.ID})
+}
+
+func (s *HTTPServer) handleUpdateSprintStatus(w http.ResponseWriter, r *http.Request) {
+	// Accept both PATCH and POST for flexibility
+	if r.Method != http.MethodPatch && r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req api.UpdateSprintStatusRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.SprintID == "" {
+		http.Error(w, "sprint_id required", http.StatusBadRequest)
+		return
+	}
+
+	if req.Status == "" {
+		http.Error(w, "status required", http.StatusBadRequest)
+		return
+	}
+
+	status := types.SprintStatus(req.Status)
+	if err := s.handler.storage.UpdateSprintStatus(r.Context(), req.SprintID, status); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.respondJSON(w, map[string]string{"status": "updated"})
+}
+
+func (s *HTTPServer) handleUpdateTaskResult(w http.ResponseWriter, r *http.Request) {
+	// Accept both PATCH and POST for flexibility
+	if r.Method != http.MethodPatch && r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req api.UpdateTaskResultRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.TaskID == "" {
+		http.Error(w, "task_id required", http.StatusBadRequest)
+		return
+	}
+
+	if req.Status == "" {
+		http.Error(w, "status required", http.StatusBadRequest)
+		return
+	}
+
+	taskStatus := types.SprintTaskStatus(req.Status)
+	if err := s.handler.storage.UpdateTaskResult(r.Context(), req.TaskID, taskStatus, req.ResultSummary, req.ResultData, req.TokensInput, req.TokensOutput, req.CostUSD, req.ErrorMessage); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.respondJSON(w, map[string]string{"status": "updated"})
+}
+
+func (s *HTTPServer) handleListModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	models, err := s.handler.storage.ListModels(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.respondJSON(w, models)
+}
+
+func (s *HTTPServer) handleUpdateModel(w http.ResponseWriter, r *http.Request) {
+	// Accept both PATCH and POST for flexibility
+	if r.Method != http.MethodPatch && r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse model name from URL path /api/v1/models/{name}
+	modelName := r.URL.Path[len("/api/v1/models/"):]
+	if modelName == "" {
+		http.Error(w, "model name required in path", http.StatusBadRequest)
+		return
+	}
+
+	var req api.UpdateModelRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Update enabled state if provided
+	if req.Enabled != nil {
+		if err := s.handler.storage.UpdateModelEnabled(r.Context(), modelName, *req.Enabled); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Update config if provided
+	if req.Config != nil {
+		if err := s.handler.storage.UpdateModelConfig(r.Context(), modelName, req.Config); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	s.respondJSON(w, map[string]string{"status": "updated"})
 }
