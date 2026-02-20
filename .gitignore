@@ -13,3 +13,6 @@ jobs/time_sessions.jsonl
 
 # Git worktrees
 .worktrees/
+
+# Fleet operational files
+.haiku-fleet-checkpoint.jsonl
