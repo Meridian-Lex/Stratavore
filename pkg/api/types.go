@@ -152,6 +152,25 @@ type GetSessionResponse struct {
 	Error   string         `json:"error,omitempty"`
 }
 
+type GetModeRequest struct{}
+
+type GetModeResponse struct {
+	Mode        string `json:"mode"`
+	Description string `json:"description,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
+type SetModeRequest struct {
+	Mode        string `json:"mode"`
+	Description string `json:"description,omitempty"`
+}
+
+type SetModeResponse struct {
+	Success bool   `json:"success"`
+	Mode    string `json:"mode"`
+	Error   string `json:"error,omitempty"`
+}
+
 // ===== MODEL TYPES =====
 
 type Runner struct {

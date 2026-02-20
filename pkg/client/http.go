@@ -132,6 +132,25 @@ func (c *Client) TriggerReconciliation(ctx context.Context) (*api.TriggerReconci
 	return &resp, err
 }
 
+// GetMode retrieves current operational mode
+func (c *Client) GetMode(ctx context.Context) (*api.GetModeResponse, error) {
+	var resp api.GetModeResponse
+	url := fmt.Sprintf("%s/mode/get", c.baseURL)
+	err := c.get(ctx, url, &resp)
+	return &resp, err
+}
+
+// SetMode updates operational mode
+func (c *Client) SetMode(ctx context.Context, mode, description string) (*api.SetModeResponse, error) {
+	req := &api.SetModeRequest{
+		Mode:        mode,
+		Description: description,
+	}
+	var resp api.SetModeResponse
+	err := c.post(ctx, "/mode/set", req, &resp)
+	return &resp, err
+}
+
 // Helper methods
 
 func (c *Client) post(ctx context.Context, path string, reqBody, respBody interface{}) error {

@@ -50,6 +50,8 @@ func NewHTTPServer(port int, handler *GRPCServer, logger *zap.Logger, cfg *confi
 	mux.HandleFunc("/api/v1/reconcile", httpServer.handleReconcile)
 	mux.HandleFunc("/api/v1/health", httpServer.handleHealth)
 	mux.HandleFunc("/api/v1/fleet/prs", httpServer.handleFleetPRs)
+	mux.HandleFunc("/api/v1/mode/get", httpServer.handleGetMode)
+	mux.HandleFunc("/api/v1/mode/set", httpServer.handleSetMode)
 
 	// Build middleware chain: rate-limit → JWT auth → mux
 	var handler_ http.Handler = mux
@@ -381,4 +383,51 @@ func (s *HTTPServer) handleFleetPRs(w http.ResponseWriter, r *http.Request) {
 func (s *HTTPServer) respondJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
+}
+
+func (s *HTTPServer) handleGetMode(w http.ResponseWriter, r *http.Request) {
+	mode, description, err := s.handler.storage.GetOperationalMode(r.Context())
+	if err != nil {
+		s.respondJSON(w, &api.GetModeResponse{Error: err.Error()})
+		return
+	}
+
+	s.respondJSON(w, &api.GetModeResponse{
+		Mode:        mode,
+		Description: description,
+	})
+}
+
+func (s *HTTPServer) handleSetMode(w http.ResponseWriter, r *http.Request) {
+	var req api.SetModeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.respondJSON(w, &api.SetModeResponse{Error: "invalid request body"})
+		return
+	}
+
+	// Validate mode
+	validModes := map[string]bool{
+		"IDLE":           true,
+		"AUTONOMOUS":     true,
+		"DIRECTED":       true,
+		"COLLABORATIVE":  true,
+	}
+
+	if !validModes[req.Mode] {
+		s.respondJSON(w, &api.SetModeResponse{
+			Success: false,
+			Error:   "invalid mode: must be one of IDLE, AUTONOMOUS, DIRECTED, COLLABORATIVE",
+		})
+		return
+	}
+
+	if err := s.handler.storage.SetOperationalMode(r.Context(), req.Mode, req.Description); err != nil {
+		s.respondJSON(w, &api.SetModeResponse{Error: err.Error()})
+		return
+	}
+
+	s.respondJSON(w, &api.SetModeResponse{
+		Success: true,
+		Mode:    req.Mode,
+	})
 }

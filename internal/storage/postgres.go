@@ -1273,3 +1273,63 @@ func (c *PostgresClient) CompleteSprintExecution(ctx context.Context, execID, st
 	`, status, completed, failed, tokensIn, tokensOut, costUSD, durationMs, execID)
 	return err
 }
+
+// GetOperationalMode retrieves the current operational mode from daemon state
+func (c *PostgresClient) GetOperationalMode(ctx context.Context) (string, string, error) {
+	var configJSON []byte
+	err := c.pool.QueryRow(ctx, `
+		SELECT config FROM daemon_state WHERE singleton = true
+	`).Scan(&configJSON)
+
+	if err == pgx.ErrNoRows {
+		// No daemon state yet, return default
+		return "IDLE", "", nil
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("query daemon_state: %w", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(configJSON, &config); err != nil {
+		return "", "", fmt.Errorf("unmarshal config: %w", err)
+	}
+
+	mode, _ := config["operational_mode"].(string)
+	description, _ := config["mode_description"].(string)
+
+	if mode == "" {
+		mode = "IDLE"
+	}
+
+	return mode, description, nil
+}
+
+// SetOperationalMode updates the operational mode in daemon state
+func (c *PostgresClient) SetOperationalMode(ctx context.Context, mode, description string) error {
+	// Upsert daemon state with mode in config JSONB
+	_, err := c.pool.Exec(ctx, `
+		INSERT INTO daemon_state (singleton, daemon_id, hostname, version, started_at, last_heartbeat, config)
+		VALUES (
+			true,
+			gen_random_uuid(),
+			'stratavore-cli',
+			'1.4.0',
+			NOW(),
+			NOW(),
+			jsonb_build_object('operational_mode', $1, 'mode_description', $2)
+		)
+		ON CONFLICT (singleton) DO UPDATE
+		SET config = jsonb_set(
+			jsonb_set(
+				daemon_state.config,
+				'{operational_mode}',
+				to_jsonb($1::text)
+			),
+			'{mode_description}',
+			to_jsonb($2::text)
+		),
+		last_heartbeat = NOW()
+	`, mode, description)
+
+	return err
+}
