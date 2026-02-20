@@ -68,7 +68,61 @@ func ParseRankStatusFile(filePath string) (*V2RankStatusFile, error) {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
 
-	return ParseRankStatus(string(content))
+	// Strip comment lines (starting with #) which are present in the file
+	cleaned := stripComments(string(content))
+
+	return ParseRankStatus(cleaned)
+}
+
+// stripComments removes lines starting with # from JSON content
+func stripComments(content string) string {
+	lines := splitLines(content)
+	var result []byte
+
+	for _, line := range lines {
+		trimmed := trimSpace(line)
+		if trimmed == "" || trimmed[0] == '#' {
+			continue // Skip comment and empty lines
+		}
+		result = append(result, []byte(line)...)
+		result = append(result, '\n')
+	}
+
+	return string(result)
+}
+
+// splitLines splits content by newlines
+func splitLines(s string) []string {
+	var lines []string
+	current := ""
+	for _, c := range s {
+		if c == '\n' {
+			lines = append(lines, current)
+			current = ""
+		} else {
+			current += string(c)
+		}
+	}
+	if current != "" {
+		lines = append(lines, current)
+	}
+	return lines
+}
+
+// trimSpace removes leading/trailing whitespace
+func trimSpace(s string) string {
+	start := 0
+	end := len(s)
+
+	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\r') {
+		start++
+	}
+
+	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\r') {
+		end--
+	}
+
+	return s[start:end]
 }
 
 // GetRankEvents converts the rank status file into a flat list of rank_tracking events
