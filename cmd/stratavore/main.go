@@ -1044,17 +1044,140 @@ func daemonAttach() error {
 	return rec.Attach()
 }
 
-// resumeCmd is a top-level alias for 'daemon attach'.
+// resumeCmd supports two modes:
+// 1. No args: resume daemon tmux session (existing behavior)
+// 2. With project name: resume a conversation session with interactive picker (Task 28)
 var resumeCmd = &cobra.Command{
-	Use:   "resume",
-	Short: "Resume the daemon tmux session",
-	Long: `Re-attach to the running stratavored daemon's tmux session.
+	Use:   "resume [project]",
+	Short: "Resume daemon session or resume a project conversation",
+	Long: `Resume operations in two ways:
 
-If the daemon is not running, prints the command to relaunch it with the
-original flags (e.g. --god, --preset) that were used at last start.`,
+With no arguments:
+  Re-attach to the running stratavored daemon's tmux session.
+  If the daemon is not running, prints the command to relaunch it.
+
+With a project name (Task 28 - Resume picker):
+  List resumable sessions for the project and show an interactive picker.
+  Displays session ID, start time, tokens used, and summary.
+  Launches runner with conversation_mode="resume" for selected session.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return daemonAttach()
+		// If no args, resume daemon (original behavior)
+		if len(args) == 0 {
+			return daemonAttach()
+		}
+
+		// With project arg: resume a conversation session with picker
+		projectName := args[0]
+		return resumeConversationSession(projectName)
 	},
+}
+
+// resumeConversationSession lists resumable sessions for a project and shows an interactive picker
+// Implements Task 28 - Resume picker CLI enhancement
+func resumeConversationSession(projectName string) error {
+	apiClient := getAPIClient()
+	ctx := context.Background()
+
+	// List sessions for the project
+	resp, err := apiClient.ListSessions(ctx, projectName)
+	if err != nil {
+		return fmt.Errorf("failed to list sessions: %w", err)
+	}
+
+	if resp.Error != "" {
+		return fmt.Errorf("error: %s", resp.Error)
+	}
+
+	// Filter for resumable sessions
+	var resumableSessions []*types.Session
+	for _, session := range resp.Sessions {
+		if session.Resumable {
+			resumableSessions = append(resumableSessions, session)
+		}
+	}
+
+	// Handle different cases: 0, 1, or >1 sessions
+	if len(resumableSessions) == 0 {
+		fmt.Printf("No resumable sessions found for project '%s'\n", projectName)
+		return nil
+	}
+
+	var selectedSession *types.Session
+
+	if len(resumableSessions) == 1 {
+		// Single session: resume directly without picker
+		selectedSession = resumableSessions[0]
+		fmt.Printf("Found 1 resumable session for project '%s'\n", projectName)
+	} else {
+		// Multiple sessions: show interactive promptui picker
+		fmt.Printf("\nFound %d resumable sessions for project '%s':\n", len(resumableSessions), projectName)
+
+		sessionLabels := make([]string, len(resumableSessions))
+		for i, s := range resumableSessions {
+			uptime := time.Since(s.StartedAt).Round(time.Second)
+			summary := s.Summary
+			if summary == "" {
+				summary = "(no summary)"
+			}
+			// Format: ID (started X ago, tokens: Y, messages: Z) - summary
+			label := fmt.Sprintf("%s (started %v ago, tokens: %d, messages: %d) - %s",
+				truncate(s.ID, 20),
+				formatDuration(uptime),
+				s.TokensUsed,
+				s.MessageCount,
+				truncate(summary, 40))
+			sessionLabels[i] = label
+		}
+
+		prompt := promptui.Select{
+			Label: "Select session to resume",
+			Items: sessionLabels,
+			Size:  10,
+		}
+
+		idx, _, err := prompt.Run()
+		if err != nil {
+			return err
+		}
+
+		selectedSession = resumableSessions[idx]
+	}
+
+	// Launch runner with resume mode and selected session
+	launchResumeRunner(ctx, projectName, selectedSession.ID)
+	return nil
+}
+
+// launchResumeRunner launches a runner to resume a conversation session
+func launchResumeRunner(ctx context.Context, projectName string, sessionID string) {
+	apiClient := getAPIClient()
+
+	req := &api.LaunchRunnerRequest{
+		ProjectName:      projectName,
+		ProjectPath:      "",
+		ConversationMode: "resume",
+		SessionID:        sessionID,
+		RuntimeType:      "process",
+	}
+
+	fmt.Printf("Launching runner to resume session %s...\n", truncate(sessionID, 20))
+
+	resp, err := apiClient.LaunchRunner(ctx, req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if resp.Error != "" {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Runner started: %s\n", resp.Runner.ID)
+	fmt.Printf("  Status: %s\n", resp.Runner.Status)
+	fmt.Printf("  Project: %s\n", resp.Runner.ProjectName)
+	fmt.Printf("  Session: %s\n", resp.Runner.SessionID)
+	fmt.Printf("\nUse 'stratavore watch %s' to monitor\n", projectName)
 }
 
 // continueCmd resumes the most recent session for a project
