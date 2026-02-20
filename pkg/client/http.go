@@ -104,6 +104,17 @@ func (c *Client) GetStatus(ctx context.Context) (*api.GetStatusResponse, error) 
 	return &resp, err
 }
 
+// ListSessions lists sessions for a project
+func (c *Client) ListSessions(ctx context.Context, projectName string) (*api.ListSessionsResponse, error) {
+	var resp api.ListSessionsResponse
+	url := fmt.Sprintf("%s/sessions/list", c.baseURL)
+	if projectName != "" {
+		url += fmt.Sprintf("?project=%s", projectName)
+	}
+	err := c.get(ctx, url, &resp)
+	return &resp, err
+}
+
 // TriggerReconciliation manually triggers reconciliation
 func (c *Client) TriggerReconciliation(ctx context.Context) (*api.TriggerReconciliationResponse, error) {
 	var resp api.TriggerReconciliationResponse
