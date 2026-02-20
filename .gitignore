@@ -5,3 +5,11 @@
 jobs/time_sessions.jsonl
 .env
 .env.local
+
+# Build artifacts
+/stratavore
+/stratavored
+/stratavore-agent
+
+# Git worktrees
+.worktrees/
