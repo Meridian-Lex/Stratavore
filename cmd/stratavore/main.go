@@ -78,6 +78,7 @@ func init() {
 	rootCmd.AddCommand(attachCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(resumeCmd)
+	rootCmd.AddCommand(continueCmd)
 	rootCmd.AddCommand(fleetCmd)
 	rootCmd.AddCommand(completionCmd)
 }
@@ -1008,6 +1009,79 @@ If the daemon is not running, prints the command to relaunch it with the
 original flags (e.g. --god, --preset) that were used at last start.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return daemonAttach()
+	},
+}
+
+// continueCmd resumes the most recent session for a project
+var continueCmd = &cobra.Command{
+	Use:   "continue <project-name>",
+	Short: "Resume most recent session for a project",
+	Long: `Resume the most recent session for the specified project.
+
+Queries the API for resumable sessions and launches the most recent one
+in conversation_mode="resume" to pick up where you left off.`,
+	Args: cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		apiClient := getAPIClient()
+		ctx := context.Background()
+
+		projectName := args[0]
+
+		// Check if daemon is running
+		if err := apiClient.Ping(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: Daemon not running. Start with: stratavored\n")
+			os.Exit(1)
+		}
+
+		// Get list of sessions for the project
+		sessionsResp, err := apiClient.ListSessions(ctx, projectName)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error listing sessions: %v\n", err)
+			os.Exit(1)
+		}
+
+		if sessionsResp.Error != "" {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", sessionsResp.Error)
+			os.Exit(1)
+		}
+
+		if len(sessionsResp.Sessions) == 0 {
+			fmt.Fprintf(os.Stderr, "No resumable sessions found for project '%s'\n", projectName)
+			os.Exit(1)
+		}
+
+		// Get the most recent session (first in list)
+		session := sessionsResp.Sessions[0]
+
+		// Launch runner with resume mode for this session
+		req := &api.LaunchRunnerRequest{
+			ProjectName:      projectName,
+			ProjectPath:      "", // Will be looked up from project
+			ConversationMode: "resume",
+			SessionID:        session.ID,
+			RuntimeType:      "process",
+		}
+
+		fmt.Printf("Resuming most recent session for project '%s'...\n", projectName)
+		fmt.Printf("  Session ID: %s\n", session.ID)
+		fmt.Printf("  Messages: %d\n", session.MessageCount)
+		fmt.Printf("  Last message: %v\n", session.LastMessageAt)
+
+		runnerResp, err := apiClient.LaunchRunner(ctx, req)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		if runnerResp.Error != "" {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", runnerResp.Error)
+			os.Exit(1)
+		}
+
+		fmt.Printf("✓ Runner started: %s\n", runnerResp.Runner.ID)
+		fmt.Printf("  Status: %s\n", runnerResp.Runner.Status)
+		fmt.Printf("  Mode: resume\n")
+		fmt.Printf("\nUse 'stratavore watch %s' to monitor\n", projectName)
 	},
 }
 
