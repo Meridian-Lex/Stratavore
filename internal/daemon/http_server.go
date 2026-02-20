@@ -15,10 +15,11 @@ import (
 
 // HTTPServer provides REST API for CLI communication
 type HTTPServer struct {
-	server  *http.Server
-	handler *GRPCServer // Reuse gRPC handler logic
-	logger  *zap.Logger
-	fleet   *FleetHandler
+	server    *http.Server
+	handler   *GRPCServer // Reuse gRPC handler logic
+	logger    *zap.Logger
+	fleet     *FleetHandler
+	startedAt time.Time
 }
 
 // NewHTTPServer creates HTTP API server.
@@ -28,9 +29,10 @@ func NewHTTPServer(port int, handler *GRPCServer, logger *zap.Logger, cfg *confi
 	mux := http.NewServeMux()
 
 	httpServer := &HTTPServer{
-		handler: handler,
-		logger:  logger,
-		fleet:   fleet,
+		handler:   handler,
+		logger:    logger,
+		fleet:     fleet,
+		startedAt: time.Now(),
 	}
 
 	// Register routes
@@ -52,6 +54,9 @@ func NewHTTPServer(port int, handler *GRPCServer, logger *zap.Logger, cfg *confi
 	mux.HandleFunc("/api/v1/fleet/prs", httpServer.handleFleetPRs)
 	mux.HandleFunc("/api/v1/mode/get", httpServer.handleGetMode)
 	mux.HandleFunc("/api/v1/mode/set", httpServer.handleSetMode)
+	mux.HandleFunc("/api/v1/config", httpServer.handleGetConfig)
+	mux.HandleFunc("/api/v1/tokens", httpServer.handleTokens)
+	mux.HandleFunc("/api/v1/state", httpServer.handleGetState)
 
 	// Build middleware chain: rate-limit → JWT auth → mux
 	var handler_ http.Handler = mux
@@ -430,4 +435,129 @@ func (s *HTTPServer) handleSetMode(w http.ResponseWriter, r *http.Request) {
 		Success: true,
 		Mode:    req.Mode,
 	})
+}
+
+func (s *HTTPServer) handleGetConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		s.respondJSON(w, &api.GetConfigResponse{Error: err.Error()})
+		return
+	}
+
+	resp := &api.GetConfigResponse{
+		Database: api.DatabaseDisplayConfig{
+			Host:     cfg.Database.PostgreSQL.Host,
+			Port:     cfg.Database.PostgreSQL.Port,
+			Database: cfg.Database.PostgreSQL.Database,
+		},
+		Daemon: api.DaemonDisplayConfig{
+			HTTPPort: cfg.Daemon.Port_HTTP,
+			GRPCPort: cfg.Daemon.Port_GRPC,
+		},
+		Observability: api.ObservabilityDisplayConfig{
+			LogLevel: cfg.Observability.LogLevel,
+		},
+	}
+
+	s.respondJSON(w, resp)
+}
+
+func (s *HTTPServer) handleTokens(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	req := &api.GetTokensRequest{}
+	resp, err := s.handler.GetTokens(r.Context(), req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.respondJSON(w, resp)
+}
+
+func (s *HTTPServer) handleGetState(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Get operational mode
+	mode, _, err := s.handler.storage.GetOperationalMode(ctx)
+	if err != nil {
+		s.logger.Error("failed to get operational mode", zap.Error(err))
+		mode = "UNKNOWN"
+	}
+
+	// Get active runners count
+	activeRunners := len(s.handler.runnerManager.GetActiveRunners())
+
+	// Get total projects count
+	projects, err := s.handler.storage.ListProjects(ctx, "")
+	totalProjects := int32(0)
+	if err != nil {
+		s.logger.Error("failed to list projects", zap.Error(err))
+	} else {
+		totalProjects = int32(len(projects))
+	}
+
+	// Get total sessions count and tokens used from database
+	totalSessions := int32(0)
+	tokensUsed := int64(0)
+
+	// Query sessions and accumulate counts
+	if projects != nil {
+		for _, proj := range projects {
+			sessions, err := s.handler.storage.GetResumableSessions(ctx, proj.Name)
+			if err != nil {
+				s.logger.Warn("failed to get sessions for project", zap.String("project", proj.Name), zap.Error(err))
+				continue
+			}
+			totalSessions += int32(len(sessions))
+			for _, sess := range sessions {
+				tokensUsed += sess.TokensUsed
+			}
+		}
+	}
+
+	// Calculate uptime
+	uptime := formatUptimeDuration(time.Since(s.startedAt))
+
+	resp := &api.GetStateResponse{
+		OperationalMode: mode,
+		DaemonStatus:    "Running",
+		Uptime:          uptime,
+		ActiveRunners:   int32(activeRunners),
+		TotalProjects:   totalProjects,
+		TotalSessions:   totalSessions,
+		TokensUsed:      tokensUsed,
+	}
+
+	s.respondJSON(w, resp)
+}
+
+// formatUptimeDuration formats a duration as a human-readable uptime string
+func formatUptimeDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	h := d / time.Hour
+	d -= h * time.Hour
+	m := d / time.Minute
+	d -= m * time.Minute
+	s := d / time.Second
+
+	if h > 0 {
+		return fmt.Sprintf("%dh %dm", h, m)
+	} else if m > 0 {
+		return fmt.Sprintf("%dm %ds", m, s)
+	}
+	return fmt.Sprintf("%ds", s)
 }

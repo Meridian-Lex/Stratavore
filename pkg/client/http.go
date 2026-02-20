@@ -151,6 +151,30 @@ func (c *Client) SetMode(ctx context.Context, mode, description string) (*api.Se
 	return &resp, err
 }
 
+// GetConfig retrieves daemon configuration
+func (c *Client) GetConfig(ctx context.Context) (*api.GetConfigResponse, error) {
+	var resp api.GetConfigResponse
+	url := fmt.Sprintf("%s/config", c.baseURL)
+	err := c.get(ctx, url, &resp)
+	return &resp, err
+}
+
+// GetTokens retrieves token usage metrics
+func (c *Client) GetTokens(ctx context.Context) (*api.GetTokensResponse, error) {
+	var resp api.GetTokensResponse
+	url := fmt.Sprintf("%s/tokens", c.baseURL)
+	err := c.get(ctx, url, &resp)
+	return &resp, err
+}
+
+// GetState retrieves daemon state information
+func (c *Client) GetState(ctx context.Context) (*api.GetStateResponse, error) {
+	var resp api.GetStateResponse
+	url := fmt.Sprintf("%s/state", c.baseURL)
+	err := c.get(ctx, url, &resp)
+	return &resp, err
+}
+
 // Helper methods
 
 func (c *Client) post(ctx context.Context, path string, reqBody, respBody interface{}) error {

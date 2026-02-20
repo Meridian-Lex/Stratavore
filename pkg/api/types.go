@@ -152,6 +152,16 @@ type GetSessionResponse struct {
 	Error   string         `json:"error,omitempty"`
 }
 
+type GetTokensRequest struct{}
+
+type GetTokensResponse struct {
+	TotalTokensUsed int64            `json:"totalTokensUsed"`
+	TokensByProject map[string]int64 `json:"tokensByProject"`
+	DailyLimit      int64            `json:"dailyLimit"`
+	UsagePercentage float64          `json:"usagePercentage"`
+	Error           string           `json:"error,omitempty"`
+}
+
 type GetModeRequest struct{}
 
 type GetModeResponse struct {
@@ -169,6 +179,43 @@ type SetModeResponse struct {
 	Success bool   `json:"success"`
 	Mode    string `json:"mode"`
 	Error   string `json:"error,omitempty"`
+}
+
+type GetConfigRequest struct{}
+
+type GetConfigResponse struct {
+	Database      DatabaseDisplayConfig      `json:"database"`
+	Daemon        DaemonDisplayConfig        `json:"daemon"`
+	Observability ObservabilityDisplayConfig `json:"observability"`
+	Error         string                     `json:"error,omitempty"`
+}
+
+type DatabaseDisplayConfig struct {
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Database string `json:"database"`
+}
+
+type DaemonDisplayConfig struct {
+	HTTPPort int `json:"http_port"`
+	GRPCPort int `json:"grpc_port"`
+}
+
+type ObservabilityDisplayConfig struct {
+	LogLevel string `json:"log_level"`
+}
+
+type GetStateRequest struct{}
+
+type GetStateResponse struct {
+	OperationalMode string `json:"operational_mode"`
+	DaemonStatus    string `json:"daemon_status"`
+	Uptime          string `json:"uptime"`
+	ActiveRunners   int32  `json:"active_runners"`
+	TotalProjects   int32  `json:"total_projects"`
+	TotalSessions   int32  `json:"total_sessions"`
+	TokensUsed      int64  `json:"tokens_used"`
+	Error           string `json:"error,omitempty"`
 }
 
 // ===== MODEL TYPES =====

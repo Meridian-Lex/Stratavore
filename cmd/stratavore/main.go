@@ -75,6 +75,7 @@ func init() {
 	rootCmd.AddCommand(runnersCmd)
 	rootCmd.AddCommand(tasksCmd)
 	rootCmd.AddCommand(modeCmd)
+	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(projectsCmd)
 	rootCmd.AddCommand(watchCmd)
 	rootCmd.AddCommand(attachCmd)
@@ -82,6 +83,7 @@ func init() {
 	rootCmd.AddCommand(resumeCmd)
 	rootCmd.AddCommand(continueCmd)
 	rootCmd.AddCommand(fleetCmd)
+	rootCmd.AddCommand(stateCmd)
 	rootCmd.AddCommand(completionCmd)
 
 	// Register projects sub-commands
@@ -713,6 +715,49 @@ Usage:
 			fmt.Fprintf(os.Stderr, "Use 'stratavore mode get' or 'stratavore mode set <MODE>'\n")
 			os.Exit(1)
 		}
+	},
+}
+
+var configCmd = &cobra.Command{
+	Use:   "config",
+	Short: "Display Stratavore configuration",
+	Long: `Show the current Stratavore configuration.
+
+Displays sanitized configuration values including:
+  - Database connection settings (host, port, database)
+  - Daemon ports (HTTP and gRPC)
+  - Observability settings (log level)
+
+Passwords and sensitive values are masked for security.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		apiClient := getAPIClient()
+		ctx := context.Background()
+
+		resp, err := apiClient.GetConfig(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		if resp.Error != "" {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+			os.Exit(1)
+		}
+
+		// Display configuration with formatted output
+		fmt.Println("Stratavore Configuration")
+		fmt.Println("════════════════════════")
+		fmt.Println("Database:")
+		fmt.Printf("  Host: %s\n", resp.Database.Host)
+		fmt.Printf("  Port: %d\n", resp.Database.Port)
+		fmt.Printf("  Database: %s\n", resp.Database.Database)
+		fmt.Println()
+		fmt.Println("Daemon:")
+		fmt.Printf("  HTTP Port: %d\n", resp.Daemon.HTTPPort)
+		fmt.Printf("  gRPC Port: %d\n", resp.Daemon.GRPCPort)
+		fmt.Println()
+		fmt.Println("Observability:")
+		fmt.Printf("  Log Level: %s\n", resp.Observability.LogLevel)
 	},
 }
 
