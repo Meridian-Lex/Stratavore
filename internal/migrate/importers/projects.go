@@ -12,7 +12,8 @@ import (
 
 // ImportProjects imports V2 projects into the projects table
 // Uses UPSERT semantics (INSERT ... ON CONFLICT UPDATE) for idempotency
-func ImportProjects(ctx context.Context, tx pgx.Tx, v2Projects []parsers.V2Project) error {
+// Returns the number of projects processed
+func ImportProjects(ctx context.Context, tx pgx.Tx, v2Projects []parsers.V2Project) (int, error) {
 	query := `
 		INSERT INTO projects (name, path, status, description, tags, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, NOW())
@@ -24,6 +25,7 @@ func ImportProjects(ctx context.Context, tx pgx.Tx, v2Projects []parsers.V2Proje
 			updated_at = NOW()
 	`
 
+	count := 0
 	for _, v2proj := range v2Projects {
 		// Map V2 status to V3 status
 		status := mapProjectStatus(v2proj.Status)
@@ -55,11 +57,12 @@ func ImportProjects(ctx context.Context, tx pgx.Tx, v2Projects []parsers.V2Proje
 		)
 
 		if err != nil {
-			return fmt.Errorf("import project %s: %w", v2proj.Name, err)
+			return count, fmt.Errorf("import project %s: %w", v2proj.Name, err)
 		}
+		count++
 	}
 
-	return nil
+	return count, nil
 }
 
 // mapProjectStatus converts V2 status strings to V3 ProjectStatus

@@ -16,3 +16,5 @@ jobs/time_sessions.jsonl
 
 # Fleet operational files
 .haiku-fleet-checkpoint.jsonl
+# Binaries
+cmd/stratavore-migrate/stratavore-migrate

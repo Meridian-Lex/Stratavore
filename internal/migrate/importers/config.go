@@ -10,22 +10,26 @@ import (
 )
 
 // ImportConfig imports V2 config (token budgets and resource quotas) into V3 tables
-func ImportConfig(ctx context.Context, tx pgx.Tx, v2Config *parsers.V2Config) error {
+// Returns (budgets_count, quotas_count, error)
+func ImportConfig(ctx context.Context, tx pgx.Tx, v2Config *parsers.V2Config) (int, int, error) {
 	// Import global token budget
-	if err := importTokenBudget(ctx, tx, v2Config); err != nil {
-		return fmt.Errorf("import token budget: %w", err)
+	budgetCount, err := importTokenBudget(ctx, tx, v2Config)
+	if err != nil {
+		return 0, 0, fmt.Errorf("import token budget: %w", err)
 	}
 
 	// Import resource quotas (derived from V2 autonomous mode settings)
-	if err := importResourceQuotas(ctx, tx, v2Config); err != nil {
-		return fmt.Errorf("import resource quotas: %w", err)
+	quotaCount, err := importResourceQuotas(ctx, tx, v2Config)
+	if err != nil {
+		return budgetCount, 0, fmt.Errorf("import resource quotas: %w", err)
 	}
 
-	return nil
+	return budgetCount, quotaCount, nil
 }
 
 // importTokenBudget creates a global token budget from V2 config
-func importTokenBudget(ctx context.Context, tx pgx.Tx, v2Config *parsers.V2Config) error {
+// Returns the number of budgets created
+func importTokenBudget(ctx context.Context, tx pgx.Tx, v2Config *parsers.V2Config) (int, error) {
 	// Calculate period boundaries for today
 	now := time.Now()
 	periodStart, periodEnd := parsers.GetPeriodBoundaries("daily", now)
@@ -53,20 +57,21 @@ func importTokenBudget(ctx context.Context, tx pgx.Tx, v2Config *parsers.V2Confi
 	)
 
 	if err != nil {
-		return fmt.Errorf("insert token budget: %w", err)
+		return 0, fmt.Errorf("insert token budget: %w", err)
 	}
 
-	return nil
+	return 1, nil
 }
 
 // importResourceQuotas creates default resource quotas
 // V2 doesn't have explicit per-project quotas, so we use sensible defaults
-func importResourceQuotas(ctx context.Context, tx pgx.Tx, v2Config *parsers.V2Config) error {
+// Returns the number of quotas created
+func importResourceQuotas(ctx context.Context, tx pgx.Tx, v2Config *parsers.V2Config) (int, error) {
 	// V2 doesn't have project-specific quotas, but we can create a default quota
 	// Only create if there's autonomous mode configuration
 	if !v2Config.AutonomousMode.Enabled {
 		// No quotas to import if autonomous mode not enabled
-		return nil
+		return 0, nil
 	}
 
 	// NOTE: In a real implementation, we'd want to get project names from the
@@ -76,7 +81,7 @@ func importResourceQuotas(ctx context.Context, tx pgx.Tx, v2Config *parsers.V2Co
 	// Alternative: Create a global default that can be referenced
 	// This is left as a no-op for now since resource_quotas are project-specific
 
-	return nil
+	return 0, nil
 }
 
 // ImportConfigForProject creates resource quotas for a specific project

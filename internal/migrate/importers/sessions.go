@@ -13,7 +13,8 @@ import (
 
 // ImportSessions imports V2 sessions into the sessions and session_blobs tables
 // V2 sessions are not resumable in V3, so resumable=false for all imports
-func ImportSessions(ctx context.Context, tx pgx.Tx, v2Sessions []parsers.V2Session) error {
+// Returns the number of sessions processed
+func ImportSessions(ctx context.Context, tx pgx.Tx, v2Sessions []parsers.V2Session) (int, error) {
 	sessionQuery := `
 		INSERT INTO sessions (
 			id, runner_id, project_name,
@@ -34,6 +35,7 @@ func ImportSessions(ctx context.Context, tx pgx.Tx, v2Sessions []parsers.V2Sessi
 		ON CONFLICT DO NOTHING
 	`
 
+	count := 0
 	for _, v2sess := range v2Sessions {
 		// Generate synthetic runner UUID for V2 sessions
 		// Use deterministic UUID v5 based on session_id to ensure idempotency
@@ -70,7 +72,7 @@ func ImportSessions(ctx context.Context, tx pgx.Tx, v2Sessions []parsers.V2Sessi
 		)
 
 		if err != nil {
-			return fmt.Errorf("import session %s: %w", v2sess.SessionID, err)
+			return count, fmt.Errorf("import session %s: %w", v2sess.SessionID, err)
 		}
 
 		// Store V2 metadata as blob
@@ -82,7 +84,7 @@ func ImportSessions(ctx context.Context, tx pgx.Tx, v2Sessions []parsers.V2Sessi
 
 		metadataJSON, err := json.Marshal(v2Metadata)
 		if err != nil {
-			return fmt.Errorf("marshal V2 metadata for session %s: %w", v2sess.SessionID, err)
+			return count, fmt.Errorf("marshal V2 metadata for session %s: %w", v2sess.SessionID, err)
 		}
 
 		storageKey := fmt.Sprintf("v2-migration/sessions/%s/metadata.json", v2sess.SessionID)
@@ -97,9 +99,10 @@ func ImportSessions(ctx context.Context, tx pgx.Tx, v2Sessions []parsers.V2Sessi
 		)
 
 		if err != nil {
-			return fmt.Errorf("import session blob for %s: %w", v2sess.SessionID, err)
+			return count, fmt.Errorf("import session blob for %s: %w", v2sess.SessionID, err)
 		}
+		count++
 	}
 
-	return nil
+	return count, nil
 }
