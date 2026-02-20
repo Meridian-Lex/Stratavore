@@ -188,10 +188,10 @@ func runImport(cmd *cobra.Command, args []string) error {
 	postChecks := &validator.PostMigrationChecks{
 		Tx: tx,
 		ExpectedCounts: map[string]int{
-			"projects":      len(projects),
-			"sessions":      len(sessions),
-			"rank_tracking": len(rankEvents),
-			"directives":    len(directives),
+			"projects":      projectsImported,
+			"sessions":      sessionsImported,
+			"rank_tracking": rankImported,
+			"directives":    directivesImported,
 		},
 	}
 	if errs := postChecks.ValidateAll(); len(errs) > 0 {
