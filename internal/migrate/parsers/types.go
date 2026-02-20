@@ -186,6 +186,7 @@ type V2RankEvent struct {
 // V2Directive represents a behavioral directive from behavioral-directives.jsonl
 type V2Directive struct {
 	ID               string                 `json:"id"`
+	Timestamp        string                 `json:"timestamp,omitempty"`
 	Severity         string                 `json:"severity"` // "PRIME" | "CRITICAL" | "HIGH" | "MEDIUM"
 	TriggerCondition string                 `json:"trigger_condition"`
 	Action           map[string]interface{} `json:"action"`
