@@ -82,11 +82,42 @@ jobs:
       - name: Update VERSION file
         run: echo "${{ steps.new_version.outputs.version }}" > VERSION
 
-      - name: Update versions in source files
+      - name: Update version in stratavored
         run: |
-          for f in cmd/stratavored/main.go cmd/stratavore/main.go cmd/stratavore-agent/main.go cmd/stratavore-migrate/main.go; do
-            sed -i "s/Version *=[^\"\']*/Version = \"${{ steps.new_version.outputs.version }}\"/" "$f"
-          done
+          sed -i "s/Version   = \"[^\"]*\"/Version   = \"${{ steps.new_version.outputs.version }}\"/" cmd/stratavored/main.go
+          echo "Updated cmd/stratavored/main.go"
+
+      - name: Update version in stratavore CLI
+        run: |
+          sed -i "s/Version   = \"[^\"]*\"/Version   = \"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore/main.go
+          echo "Updated cmd/stratavore/main.go"
+
+      - name: Update version in stratavore-agent
+        run: |
+          sed -i "s/Version     = \"[^\"]*\"/Version     = \"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore-agent/main.go
+          echo "Updated cmd/stratavore-agent/main.go"
+
+      - name: Update version in stratavore-migrate
+        run: |
+          sed -i "s/Version   = \"[^\"]*\"/Version   = \"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore-migrate/main.go
+          echo "Updated cmd/stratavore-migrate/main.go"
+
+      - name: Verify version updates
+        run: |
+          echo "=== VERSION file ==="
+          cat VERSION
+          echo ""
+          echo "=== stratavored version ==="
+          grep 'Version   =' cmd/stratavored/main.go
+          echo ""
+          echo "=== stratavore version ==="
+          grep 'Version   =' cmd/stratavore/main.go
+          echo ""
+          echo "=== stratavore-agent version ==="
+          grep 'Version     =' cmd/stratavore-agent/main.go
+          echo ""
+          echo "=== stratavore-migrate version ==="
+          grep 'Version   =' cmd/stratavore-migrate/main.go
 
       - name: Build binaries
         uses: actions/setup-go@v5
