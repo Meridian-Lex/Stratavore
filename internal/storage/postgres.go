@@ -54,6 +54,7 @@ func (c *PostgresClient) BeginTx(ctx context.Context) (pgx.Tx, error) {
 }
 
 // GetPool returns the underlying pgxpool.Pool for direct access
+// Deprecated: Use type-specific methods instead to maintain abstraction
 func (c *PostgresClient) GetPool() *pgxpool.Pool {
 	return c.pool
 }
@@ -1386,6 +1387,15 @@ func (c *PostgresClient) ListAllSessions(ctx context.Context) ([]*types.Session,
 	}
 
 	return sessions, rows.Err()
+}
+
+// ===== AGENTS =====
+
+// CheckAgentNameExists checks if an agent name is already registered
+func (c *PostgresClient) CheckAgentNameExists(ctx context.Context, agentName string) (bool, error) {
+	var exists bool
+	err := c.pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM agent_personalities WHERE agent_name = $1)", agentName).Scan(&exists)
+	return exists, err
 }
 
 // GetDailyTokenBudget retrieves the current daily token budget

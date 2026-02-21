@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -33,8 +34,7 @@ func (m *AgentManager) RegisterAgent(ctx context.Context, req *api.RegisterAgent
 	}
 
 	// Check if agent name already exists
-	var exists bool
-	err := m.db.GetPool().QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM agent_personalities WHERE agent_name = $1)", req.AgentName).Scan(&exists)
+	exists, err := m.db.CheckAgentNameExists(ctx, req.AgentName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check agent name: %w", err)
 	}
@@ -45,16 +45,37 @@ func (m *AgentManager) RegisterAgent(ctx context.Context, req *api.RegisterAgent
 	agentID := uuid.New().String()
 	now := time.Now()
 
-	// Insert agent personality
-	_, err = m.db.GetPool().Exec(ctx, `
+	// Marshal personality traits to JSON
+	var traitsJSON []byte
+	if req.PersonalityTraits != nil && len(req.PersonalityTraits) > 0 {
+		traitsJSON, err = json.Marshal(req.PersonalityTraits)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal personality traits: %w", err)
+		}
+	} else {
+		traitsJSON = []byte("{}")
+	}
+
+	// Insert agent personality using transaction for consistency
+	tx, err := m.db.BeginTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	_, err = tx.Exec(ctx, `
 		INSERT INTO agent_personalities (
 			id, agent_name, personality_traits, current_rank, rank_progress, strikes,
 			created_at, last_active_at, updated_at
 		) VALUES ($1, $2, $3, 0, 0, 0, $4, $4, $4)
-	`, agentID, req.AgentName, req.PersonalityTraits, now)
+	`, agentID, req.AgentName, traitsJSON, now)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to register agent: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	m.logger.Info("agent registered",
@@ -66,7 +87,14 @@ func (m *AgentManager) RegisterAgent(ctx context.Context, req *api.RegisterAgent
 
 // GetAgent retrieves an agent personality by ID
 func (m *AgentManager) GetAgent(ctx context.Context, agentID string) (*api.AgentPersonality, error) {
-	row := m.db.GetPool().QueryRow(ctx, `
+	// Use a transaction for consistent read
+	tx, err := m.db.BeginTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	row := tx.QueryRow(ctx, `
 		SELECT id, agent_name, specialization, personality_traits,
 		       current_rank, rank_progress, strikes,
 		       total_missions, successful_missions, failed_missions,
@@ -81,7 +109,7 @@ func (m *AgentManager) GetAgent(ctx context.Context, agentID string) (*api.Agent
 	var lastActiveAt *time.Time
 	var personalityTraits []byte
 
-	err := row.Scan(
+	err = row.Scan(
 		&agent.ID,
 		&agent.AgentName,
 		&specialization,
@@ -113,6 +141,24 @@ func (m *AgentManager) GetAgent(ctx context.Context, agentID string) (*api.Agent
 		agent.LastActiveAt = lastActiveAt.String()
 	}
 
+	// Unmarshal personality traits from JSON byte array
+	if len(personalityTraits) > 0 {
+		err = json.Unmarshal(personalityTraits, &agent.PersonalityTraits)
+		if err != nil {
+			m.logger.Warn("failed to unmarshal personality traits",
+				zap.String("agent_id", agentID),
+				zap.Error(err))
+			// Continue - don't fail the entire operation for malformed JSON
+			agent.PersonalityTraits = make(map[string]interface{})
+		}
+	} else {
+		agent.PersonalityTraits = make(map[string]interface{})
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
 	return agent, nil
 }
 
@@ -122,15 +168,22 @@ func (m *AgentManager) ListAgents(ctx context.Context, limit, offset int32) ([]*
 		limit = 50
 	}
 
+	// Use transaction for consistent read
+	tx, err := m.db.BeginTx(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	// Get total count
 	var total int32
-	err := m.db.GetPool().QueryRow(ctx, "SELECT COUNT(*) FROM agent_personalities").Scan(&total)
+	err = tx.QueryRow(ctx, "SELECT COUNT(*) FROM agent_personalities").Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to count agents: %w", err)
 	}
 
 	// Get agents
-	rows, err := m.db.GetPool().Query(ctx, `
+	rows, err := tx.Query(ctx, `
 		SELECT id, agent_name, specialization, personality_traits,
 		       current_rank, rank_progress, strikes,
 		       total_missions, successful_missions, failed_missions,
@@ -180,7 +233,24 @@ func (m *AgentManager) ListAgents(ctx context.Context, limit, offset int32) ([]*
 			agent.LastActiveAt = lastActiveAt.String()
 		}
 
+		// Unmarshal personality traits from JSON byte array
+		if len(personalityTraits) > 0 {
+			err = json.Unmarshal(personalityTraits, &agent.PersonalityTraits)
+			if err != nil {
+				m.logger.Warn("failed to unmarshal personality traits for agent",
+					zap.String("agent_id", agent.ID),
+					zap.Error(err))
+				agent.PersonalityTraits = make(map[string]interface{})
+			}
+		} else {
+			agent.PersonalityTraits = make(map[string]interface{})
+		}
+
 		agents = append(agents, agent)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, 0, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	return agents, total, nil
@@ -194,20 +264,31 @@ func (m *AgentManager) UpdateAgent(ctx context.Context, req *api.UpdateAgentRequ
 		return nil, err
 	}
 
+	// Use transaction to ensure atomicity of multiple updates
+	tx, err := m.db.BeginTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	// Build dynamic update query
 	if req.PersonalityTraits != nil {
-		_, err = m.db.GetPool().Exec(ctx, `
+		traitsJSON, err := json.Marshal(req.PersonalityTraits)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal personality traits: %w", err)
+		}
+		_, err = tx.Exec(ctx, `
 			UPDATE agent_personalities
 			SET personality_traits = $1, updated_at = NOW()
 			WHERE id = $2
-		`, req.PersonalityTraits, req.AgentID)
+		`, traitsJSON, req.AgentID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to update personality traits: %w", err)
 		}
 	}
 
 	if req.Specialization != nil {
-		_, err = m.db.GetPool().Exec(ctx, `
+		_, err = tx.Exec(ctx, `
 			UPDATE agent_personalities
 			SET specialization = $1, updated_at = NOW()
 			WHERE id = $2
@@ -215,6 +296,10 @@ func (m *AgentManager) UpdateAgent(ctx context.Context, req *api.UpdateAgentRequ
 		if err != nil {
 			return nil, fmt.Errorf("failed to update specialization: %w", err)
 		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	return m.GetAgent(ctx, req.AgentID)
@@ -428,21 +513,50 @@ func (m *AgentManager) StrikeAgent(ctx context.Context, req *api.StrikeAgentRequ
 	return demoted, newRank, nil
 }
 
+// scanMission populates an AgentMission from row scan results
+func (m *AgentManager) scanMission(mission *api.AgentMission, missionDesc, projectName, runnerID, sessionID, resultSummary, completedAt *string) {
+	if missionDesc != nil {
+		mission.MissionDescription = *missionDesc
+	}
+	if projectName != nil {
+		mission.ProjectName = *projectName
+	}
+	if runnerID != nil {
+		mission.RunnerID = *runnerID
+	}
+	if sessionID != nil {
+		mission.SessionID = *sessionID
+	}
+	if resultSummary != nil {
+		mission.ResultSummary = *resultSummary
+	}
+	if completedAt != nil {
+		mission.CompletedAt = *completedAt
+	}
+}
+
 // ListAgentMissions retrieves mission history for an agent
 func (m *AgentManager) ListAgentMissions(ctx context.Context, agentID string, limit, offset int32) ([]*api.AgentMission, int32, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 
+	// Use transaction for consistent read
+	tx, err := m.db.BeginTx(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	// Get total count
 	var total int32
-	err := m.db.GetPool().QueryRow(ctx, "SELECT COUNT(*) FROM agent_missions WHERE agent_id = $1", agentID).Scan(&total)
+	err = tx.QueryRow(ctx, "SELECT COUNT(*) FROM agent_missions WHERE agent_id = $1", agentID).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to count missions: %w", err)
 	}
 
 	// Get missions
-	rows, err := m.db.GetPool().Query(ctx, `
+	rows, err := tx.Query(ctx, `
 		SELECT id, agent_id, mission_type, mission_name, mission_description,
 		       project_name, runner_id, session_id, status, result_summary,
 		       tokens_used, runtime_hours, started_at, completed_at, created_at
@@ -482,26 +596,12 @@ func (m *AgentManager) ListAgentMissions(ctx context.Context, agentID string, li
 			return nil, 0, fmt.Errorf("failed to scan mission: %w", err)
 		}
 
-		if missionDesc != nil {
-			mission.MissionDescription = *missionDesc
-		}
-		if projectName != nil {
-			mission.ProjectName = *projectName
-		}
-		if runnerID != nil {
-			mission.RunnerID = *runnerID
-		}
-		if sessionID != nil {
-			mission.SessionID = *sessionID
-		}
-		if resultSummary != nil {
-			mission.ResultSummary = *resultSummary
-		}
-		if completedAt != nil {
-			mission.CompletedAt = *completedAt
-		}
-
+		m.scanMission(mission, missionDesc, projectName, runnerID, sessionID, resultSummary, completedAt)
 		missions = append(missions, mission)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, 0, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	return missions, total, nil
@@ -542,7 +642,14 @@ func (m *AgentManager) CreateMission(ctx context.Context, req *api.CreateMission
 		sessionIDPtr = &req.SessionID
 	}
 
-	_, err = m.db.GetPool().Exec(ctx, `
+	// Use transaction to ensure atomicity of mission insertion and counter update
+	tx, err := m.db.BeginTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	_, err = tx.Exec(ctx, `
 		INSERT INTO agent_missions (
 			id, agent_id, mission_type, mission_name, mission_description,
 			project_name, runner_id, session_id, status, started_at, created_at
@@ -564,13 +671,17 @@ func (m *AgentManager) CreateMission(ctx context.Context, req *api.CreateMission
 	}
 
 	// Increment total_missions counter
-	_, err = m.db.GetPool().Exec(ctx, `
+	_, err = tx.Exec(ctx, `
 		UPDATE agent_personalities
 		SET total_missions = total_missions + 1, last_active_at = NOW(), updated_at = NOW()
 		WHERE id = $1
 	`, req.AgentID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update agent mission count: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	m.logger.Info("mission created",
@@ -580,7 +691,7 @@ func (m *AgentManager) CreateMission(ctx context.Context, req *api.CreateMission
 		zap.String("mission_name", req.MissionName))
 
 	// Retrieve and return the created mission
-	row := m.db.GetPool().QueryRow(ctx, `
+	row := tx.QueryRow(ctx, `
 		SELECT id, agent_id, mission_type, mission_name, mission_description,
 		       project_name, runner_id, session_id, status, result_summary,
 		       tokens_used, runtime_hours, started_at, completed_at, created_at
@@ -612,24 +723,6 @@ func (m *AgentManager) CreateMission(ctx context.Context, req *api.CreateMission
 		return nil, fmt.Errorf("failed to retrieve created mission: %w", err)
 	}
 
-	if missionDesc != nil {
-		mission.MissionDescription = *missionDesc
-	}
-	if projectName != nil {
-		mission.ProjectName = *projectName
-	}
-	if runnerID != nil {
-		mission.RunnerID = *runnerID
-	}
-	if sessionID != nil {
-		mission.SessionID = *sessionID
-	}
-	if resultSummary != nil {
-		mission.ResultSummary = *resultSummary
-	}
-	if completedAt != nil {
-		mission.CompletedAt = *completedAt
-	}
-
+	m.scanMission(mission, missionDesc, projectName, runnerID, sessionID, resultSummary, completedAt)
 	return mission, nil
 }

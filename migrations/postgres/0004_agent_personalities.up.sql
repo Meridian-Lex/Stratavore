@@ -108,6 +108,10 @@ CREATE INDEX idx_agent_rank_events_created ON agent_rank_events(created_at DESC)
 CREATE TRIGGER agent_personalities_updated_at BEFORE UPDATE ON agent_personalities
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
+-- RESERVED FOR FUTURE USE: Database-level utilities for agent management
+-- These functions could be invoked directly from database clients without Go overhead.
+-- Currently, equivalent logic is implemented in Go for consistency with application layer.
+
 -- Function to calculate agent specialization from mission history
 -- Specialization develops after 3+ successful missions of a consistent type
 CREATE OR REPLACE FUNCTION calculate_agent_specialization(p_agent_id UUID)
