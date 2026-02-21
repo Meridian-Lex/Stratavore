@@ -1,18 +1,16 @@
 name: Version Bump
 
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - 'VERSION'
-      - '.github/workflows/version-bump.yml'
+  pull_request:
+    types: [closed]
 
+# Only run when the PR is merged
 jobs:
   bump-version:
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
-    # Skip if commit message contains [skip ci] or is already a version bump
-    if: "!contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event.head_commit.message, 'chore: bump version')"
+    permissions:
+      contents: write  # Required to push back to repo
 
     steps:
       - name: Checkout code
@@ -29,7 +27,6 @@ jobs:
       - name: Get current version
         id: current_version
         run: |
-          # Read VERSION file (e.g., "1.4.0")
           CURRENT_VERSION=$(cat VERSION)
           echo "version=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
           echo "Current version: ${CURRENT_VERSION}"
@@ -37,32 +34,20 @@ jobs:
       - name: Determine bump type
         id: bump_type
         run: |
-          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          COMMIT_MSG="${{ github.event.pull_request.title }}"
 
-          # Parse first line of commit message for conventional commits
-          FIRST_LINE=$(echo "$COMMIT_MSG" | head -1)
-
-          # Check for BREAKING CHANGE in full message (indicates major bump)
           if echo "$COMMIT_MSG" | grep -qiE "^BREAKING CHANGE:|breaking change:"; then
             echo "type=major" >> $GITHUB_OUTPUT
-            echo "Bump type: MAJOR (breaking change detected)"
-          # Check for feat: or feature: (minor bump)
-          elif echo "$FIRST_LINE" | grep -qiE "^feat(\(.+\))?:|^feature:"; then
+          elif echo "$COMMIT_MSG" | grep -qiE "^feat(\(.+\))?:|^feature:"; then
             echo "type=minor" >> $GITHUB_OUTPUT
-            echo "Bump type: MINOR (feature)"
-          # Check for fix: or bugfix: (patch bump)
-          elif echo "$FIRST_LINE" | grep -qiE "^fix(\(.+\))?:|^bugfix:"; then
+          elif echo "$COMMIT_MSG" | grep -qiE "^fix(\(.+\))?:|^bugfix:"; then
             echo "type=patch" >> $GITHUB_OUTPUT
-            echo "Bump type: PATCH (bugfix)"
-          # Check for major: prefix
-          elif echo "$FIRST_LINE" | grep -qiE "^major:"; then
+          elif echo "$COMMIT_MSG" | grep -qiE "^major:"; then
             echo "type=major" >> $GITHUB_OUTPUT
-            echo "Bump type: MAJOR (explicit major prefix)"
-          # Default to patch for any other commit
           else
             echo "type=patch" >> $GITHUB_OUTPUT
-            echo "Bump type: PATCH (default)"
           fi
+          echo "Bump type: ${{ steps.bump_type.outputs.type }}"
 
       - name: Bump version
         id: new_version
@@ -70,10 +55,8 @@ jobs:
           CURRENT_VERSION="${{ steps.current_version.outputs.version }}"
           BUMP_TYPE="${{ steps.bump_type.outputs.type }}"
 
-          # Parse current version (e.g., "1.4.0")
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
 
-          # Calculate new version based on bump type
           case "$BUMP_TYPE" in
             major)
               NEW_MAJOR=$((MAJOR + 1))
@@ -97,89 +80,45 @@ jobs:
           echo "New version: ${NEW_VERSION}"
 
       - name: Update VERSION file
-        run: |
-          echo "${{ steps.new_version.outputs.version }}" > VERSION
-          echo "VERSION file updated to ${{ steps.new_version.outputs.version }}"
+        run: echo "${{ steps.new_version.outputs.version }}" > VERSION
 
-      - name: Update version in stratavored
+      - name: Update versions in source files
         run: |
-          sed -i "s/Version   = \"[^\"]*\"/Version   = \"${{ steps.new_version.outputs.version }}\"/" cmd/stratavored/main.go
-          echo "Updated cmd/stratavored/main.go"
+          for f in cmd/stratavored/main.go cmd/stratavore/main.go cmd/stratavore-agent/main.go cmd/stratavore-migrate/main.go; do
+            sed -i "s/Version *=[^\"\']*/Version = \"${{ steps.new_version.outputs.version }}\"/" "$f"
+          done
 
-      - name: Update version in stratavore CLI
-        run: |
-          sed -i "s/Version   = \"[^\"]*\"/Version   = \"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore/main.go
-          echo "Updated cmd/stratavore/main.go"
-
-      - name: Update version in stratavore-agent
-        run: |
-          sed -i "s/Version     = \"[^\"]*\"/Version     = \"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore-agent/main.go
-          echo "Updated cmd/stratavore-agent/main.go"
-
-      - name: Update version in stratavore-migrate
-        run: |
-          sed -i "s/Version   = \"[^\"]*\"/Version   = \"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore-migrate/main.go
-          echo "Updated cmd/stratavore-migrate/main.go"
-
-      - name: Set up Go
+      - name: Build binaries
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+      - run: make build
 
-      - name: Build binaries for verification
-        run: make build
-
-      - name: Verify bin/ artifacts
+      - name: Verify bin artifacts
         run: |
-          echo "Verifying bin/ artifacts..."
-          ls -lh bin/
-          test -f bin/stratavore || (echo "bin/stratavore not found" && exit 1)
-          test -f bin/stratavored || (echo "bin/stratavored not found" && exit 1)
-          test -f bin/stratavore-agent || (echo "bin/stratavore-agent not found" && exit 1)
-          test -f bin/stratavore-migrate || (echo "bin/stratavore-migrate not found" && exit 1)
-          echo "All artifacts verified"
-
-      - name: Verify version updates
-        run: |
-          echo "=== VERSION file ==="
-          cat VERSION
-          echo ""
-          echo "=== stratavored version ==="
-          grep 'Version   =' cmd/stratavored/main.go
-          echo ""
-          echo "=== stratavore version ==="
-          grep 'Version   =' cmd/stratavore/main.go
-          echo ""
-          echo "=== stratavore-agent version ==="
-          grep 'Version     =' cmd/stratavore-agent/main.go
-          echo ""
-          echo "=== stratavore-migrate version ==="
-          grep 'Version   =' cmd/stratavore-migrate/main.go
+          for b in bin/stratavore bin/stratavored bin/stratavore-agent bin/stratavore-migrate; do
+            test -f "$b" || (echo "$b missing" && exit 1)
+          done
 
       - name: Commit version bump
         run: |
           git add VERSION cmd/stratavored/main.go cmd/stratavore/main.go cmd/stratavore-agent/main.go cmd/stratavore-migrate/main.go
-          git commit -m "chore: bump version to ${{ steps.new_version.outputs.version }} [skip ci]"
-          echo "Committed version bump"
+          git commit -m "chore: bump version to ${{ steps.new_version.outputs.version }} [skip ci]" || echo "Nothing to commit"
 
       - name: Create git tag
-        run: |
-          git tag -a "v${{ steps.new_version.outputs.version }}" -m "Release v${{ steps.new_version.outputs.version }}"
-          echo "Created git tag v${{ steps.new_version.outputs.version }}"
+        run: git tag -a "v${{ steps.new_version.outputs.version }}" -m "Release v${{ steps.new_version.outputs.version }}"
 
       - name: Push changes and tag
         run: |
           git push origin main
           git push origin "v${{ steps.new_version.outputs.version }}"
-          echo "Pushed changes and tag to origin"
 
       - name: Report version bump
         run: |
           echo "Version Bump Summary"
-          echo "===================="
           echo "Previous: ${{ steps.current_version.outputs.version }}"
           echo "Current:  ${{ steps.new_version.outputs.version }}"
           echo "Type:     ${{ steps.bump_type.outputs.type }}"
-          echo "Commit:   ${{ github.event.head_commit.id }}"
-          echo "Message:  ${{ github.event.head_commit.message }}"
+          echo "PR:       ${{ github.event.pull_request.number }}"
+          echo "Title:    ${{ github.event.pull_request.title }}"
