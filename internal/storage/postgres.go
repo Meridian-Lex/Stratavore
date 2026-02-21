@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/meridian-lex/stratavore/pkg/api"
 	"github.com/meridian-lex/stratavore/pkg/types"
 )
 
@@ -1437,4 +1438,239 @@ func (c *PostgresClient) GetDailyTokenBudget(ctx context.Context) (*types.TokenB
 	}
 
 	return &budget, nil
+}
+
+// ===== AGENT PERSONALITY METHODS =====
+
+// GetAgentByID retrieves an agent personality by ID with concrete type-safe access
+func (c *PostgresClient) GetAgentByID(ctx context.Context, agentID string) (*api.AgentPersonality, error) {
+	tx, err := c.BeginTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	row := tx.QueryRow(ctx, `
+		SELECT id, agent_name, specialization, personality_traits,
+		       current_rank, rank_progress, strikes,
+		       total_missions, successful_missions, failed_missions,
+		       total_tokens_used, total_runtime_hours,
+		       created_at, last_active_at, updated_at
+		FROM agent_personalities
+		WHERE id = $1
+	`, agentID)
+
+	agent := &api.AgentPersonality{}
+	var specialization *string
+	var lastActiveAt *time.Time
+	var personalityTraits []byte
+
+	err = row.Scan(
+		&agent.ID,
+		&agent.AgentName,
+		&specialization,
+		&personalityTraits,
+		&agent.CurrentRank,
+		&agent.RankProgress,
+		&agent.Strikes,
+		&agent.TotalMissions,
+		&agent.SuccessfulMissions,
+		&agent.FailedMissions,
+		&agent.TotalTokensUsed,
+		&agent.TotalRuntimeHours,
+		&agent.CreatedAt,
+		&lastActiveAt,
+		&agent.UpdatedAt,
+	)
+
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("agent not found: %s", agentID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get agent: %w", err)
+	}
+
+	if specialization != nil {
+		agent.Specialization = *specialization
+	}
+	if lastActiveAt != nil {
+		agent.LastActiveAt = lastActiveAt.String()
+	}
+
+	// Unmarshal personality traits from JSON byte array
+	if len(personalityTraits) > 0 {
+		err = json.Unmarshal(personalityTraits, &agent.PersonalityTraits)
+		if err != nil {
+			// Continue without traits on malformed JSON
+			agent.PersonalityTraits = make(map[string]interface{})
+		}
+	} else {
+		agent.PersonalityTraits = make(map[string]interface{})
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return agent, nil
+}
+
+// ListAgents retrieves all agent personalities with pagination
+func (c *PostgresClient) ListAgents(ctx context.Context, limit, offset int32) ([]*api.AgentPersonality, int32, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	tx, err := c.BeginTx(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Get total count
+	var total int32
+	err = tx.QueryRow(ctx, "SELECT COUNT(*) FROM agent_personalities").Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count agents: %w", err)
+	}
+
+	// Get agents
+	rows, err := tx.Query(ctx, `
+		SELECT id, agent_name, specialization, personality_traits,
+		       current_rank, rank_progress, strikes,
+		       total_missions, successful_missions, failed_missions,
+		       total_tokens_used, total_runtime_hours,
+		       created_at, last_active_at, updated_at
+		FROM agent_personalities
+		ORDER BY current_rank DESC, rank_progress DESC, created_at ASC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list agents: %w", err)
+	}
+	defer rows.Close()
+
+	agents := []*api.AgentPersonality{}
+	for rows.Next() {
+		agent := &api.AgentPersonality{}
+		var specialization *string
+		var lastActiveAt *time.Time
+		var personalityTraits []byte
+
+		err := rows.Scan(
+			&agent.ID,
+			&agent.AgentName,
+			&specialization,
+			&personalityTraits,
+			&agent.CurrentRank,
+			&agent.RankProgress,
+			&agent.Strikes,
+			&agent.TotalMissions,
+			&agent.SuccessfulMissions,
+			&agent.FailedMissions,
+			&agent.TotalTokensUsed,
+			&agent.TotalRuntimeHours,
+			&agent.CreatedAt,
+			&lastActiveAt,
+			&agent.UpdatedAt,
+		)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to scan agent: %w", err)
+		}
+
+		if specialization != nil {
+			agent.Specialization = *specialization
+		}
+		if lastActiveAt != nil {
+			agent.LastActiveAt = lastActiveAt.String()
+		}
+
+		// Unmarshal personality traits from JSON byte array
+		if len(personalityTraits) > 0 {
+			err = json.Unmarshal(personalityTraits, &agent.PersonalityTraits)
+			if err != nil {
+				agent.PersonalityTraits = make(map[string]interface{})
+			}
+		} else {
+			agent.PersonalityTraits = make(map[string]interface{})
+		}
+
+		agents = append(agents, agent)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, 0, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return agents, total, nil
+}
+
+// GetMissionByID retrieves a mission by ID with concrete type-safe access
+func (c *PostgresClient) GetMissionByID(ctx context.Context, missionID string) (*api.AgentMission, error) {
+	tx, err := c.BeginTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	row := tx.QueryRow(ctx, `
+		SELECT id, agent_id, mission_type, mission_name, mission_description,
+		       project_name, runner_id, session_id, status, result_summary,
+		       tokens_used, runtime_hours, started_at, completed_at, created_at
+		FROM agent_missions
+		WHERE id = $1
+	`, missionID)
+
+	mission := &api.AgentMission{}
+	var missionDesc, projectName, runnerID, sessionID, resultSummary, completedAt *string
+
+	err = row.Scan(
+		&mission.ID,
+		&mission.AgentID,
+		&mission.MissionType,
+		&mission.MissionName,
+		&missionDesc,
+		&projectName,
+		&runnerID,
+		&sessionID,
+		&mission.Status,
+		&resultSummary,
+		&mission.TokensUsed,
+		&mission.RuntimeHours,
+		&mission.StartedAt,
+		&completedAt,
+		&mission.CreatedAt,
+	)
+
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("mission not found: %s", missionID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get mission: %w", err)
+	}
+
+	if missionDesc != nil {
+		mission.MissionDescription = *missionDesc
+	}
+	if projectName != nil {
+		mission.ProjectName = *projectName
+	}
+	if runnerID != nil {
+		mission.RunnerID = *runnerID
+	}
+	if sessionID != nil {
+		mission.SessionID = *sessionID
+	}
+	if resultSummary != nil {
+		mission.ResultSummary = *resultSummary
+	}
+	if completedAt != nil {
+		mission.CompletedAt = *completedAt
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return mission, nil
 }
