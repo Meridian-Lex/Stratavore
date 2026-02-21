@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -911,7 +912,7 @@ func (s *HTTPServer) handleRegisterAgent(w http.ResponseWriter, r *http.Request)
 
 	var req api.RegisterAgentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.respondJSON(w, &api.RegisterAgentResponse{Error: "invalid request body"})
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -938,6 +939,18 @@ func (s *HTTPServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	// Parse query parameters
 	limit := int32(50)
 	offset := int32(0)
+
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if l, err := strconv.ParseInt(limitStr, 10, 32); err == nil && l > 0 {
+			limit = int32(l)
+		}
+	}
+
+	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
+		if o, err := strconv.ParseInt(offsetStr, 10, 32); err == nil && o >= 0 {
+			offset = int32(o)
+		}
+	}
 
 	agents, total, err := s.agentManager.ListAgents(r.Context(), limit, offset)
 	if err != nil {
@@ -990,7 +1003,7 @@ func (s *HTTPServer) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 
 	var req api.UpdateAgentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.respondJSON(w, &api.UpdateAgentResponse{Error: "invalid request body"})
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -1016,7 +1029,7 @@ func (s *HTTPServer) handleCommendAgent(w http.ResponseWriter, r *http.Request) 
 
 	var req api.CommendAgentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.respondJSON(w, &api.CommendAgentResponse{Error: "invalid request body"})
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -1046,7 +1059,7 @@ func (s *HTTPServer) handleStrikeAgent(w http.ResponseWriter, r *http.Request) {
 
 	var req api.StrikeAgentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.respondJSON(w, &api.StrikeAgentResponse{Error: "invalid request body"})
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -1105,7 +1118,7 @@ func (s *HTTPServer) handleCreateMission(w http.ResponseWriter, r *http.Request)
 
 	var req api.CreateMissionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.respondJSON(w, &api.CreateMissionResponse{Error: "invalid request body"})
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
