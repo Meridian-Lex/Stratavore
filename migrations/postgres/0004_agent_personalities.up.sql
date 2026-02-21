@@ -15,6 +15,11 @@ CREATE TABLE agent_personalities (
     rank_progress INTEGER NOT NULL DEFAULT 0,  -- Commendation points toward next rank (0-4, promotes at 5)
     strikes INTEGER NOT NULL DEFAULT 0,  -- Strike count (demoted at 3)
 
+    -- Constraints
+    CHECK (current_rank >= 0 AND current_rank <= 10),
+    CHECK (rank_progress >= 0 AND rank_progress < 5),
+    CHECK (strikes >= 0 AND strikes < 3),
+
     -- Service record
     total_missions INTEGER DEFAULT 0,
     successful_missions INTEGER DEFAULT 0,
@@ -63,7 +68,12 @@ CREATE TABLE agent_missions (
     created_at TIMESTAMPTZ DEFAULT NOW(),
 
     FOREIGN KEY (agent_id) REFERENCES agent_personalities(id) ON DELETE CASCADE,
-    FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE SET NULL
+    FOREIGN KEY (runner_id) REFERENCES runners(id) ON DELETE SET NULL,
+
+    -- Constraints
+    CHECK (status IN ('pending', 'in_progress', 'success', 'failed', 'abandoned')),
+    CHECK (tokens_used >= 0),
+    CHECK (runtime_hours >= 0)
 );
 
 CREATE INDEX idx_agent_missions_agent ON agent_missions(agent_id);
@@ -97,7 +107,13 @@ CREATE TABLE agent_rank_events (
     created_at TIMESTAMPTZ DEFAULT NOW(),
 
     FOREIGN KEY (agent_id) REFERENCES agent_personalities(id) ON DELETE CASCADE,
-    FOREIGN KEY (mission_id) REFERENCES agent_missions(id) ON DELETE SET NULL
+    FOREIGN KEY (mission_id) REFERENCES agent_missions(id) ON DELETE SET NULL,
+
+    -- Constraints
+    CHECK (event_type IN ('commendation', 'strike', 'promotion', 'demotion')),
+    CHECK (points_awarded >= 0),
+    CHECK (rank_before >= 0 AND rank_before <= 10),
+    CHECK (rank_after >= 0 AND rank_after <= 10)
 );
 
 CREATE INDEX idx_agent_rank_events_agent ON agent_rank_events(agent_id);

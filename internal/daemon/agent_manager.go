@@ -380,12 +380,14 @@ func (m *AgentManager) CommendAgent(ctx context.Context, req *api.CommendAgentRe
 	if newProgress >= 5 && currentRank < 10 {
 		promoted = true
 		newRank = currentRank + 1
+		// Preserve remainder points after promotion (e.g., 7 points -> rank up with 2 points progress)
+		remainderProgress := newProgress - 5
 
 		_, err = tx.Exec(ctx, `
 			UPDATE agent_personalities
-			SET current_rank = $1, rank_progress = 0, updated_at = NOW()
-			WHERE id = $2
-		`, newRank, req.AgentID)
+			SET current_rank = $1, rank_progress = $2, updated_at = NOW()
+			WHERE id = $3
+		`, newRank, remainderProgress, req.AgentID)
 		if err != nil {
 			return false, 0, fmt.Errorf("failed to promote agent: %w", err)
 		}
@@ -680,17 +682,7 @@ func (m *AgentManager) CreateMission(ctx context.Context, req *api.CreateMission
 		return nil, fmt.Errorf("failed to update agent mission count: %w", err)
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	m.logger.Info("mission created",
-		zap.String("mission_id", missionID),
-		zap.String("agent_id", req.AgentID),
-		zap.String("mission_type", req.MissionType),
-		zap.String("mission_name", req.MissionName))
-
-	// Retrieve and return the created mission
+	// Retrieve and return the created mission BEFORE committing
 	row := tx.QueryRow(ctx, `
 		SELECT id, agent_id, mission_type, mission_name, mission_description,
 		       project_name, runner_id, session_id, status, result_summary,
@@ -722,6 +714,16 @@ func (m *AgentManager) CreateMission(ctx context.Context, req *api.CreateMission
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve created mission: %w", err)
 	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	m.logger.Info("mission created",
+		zap.String("mission_id", missionID),
+		zap.String("agent_id", req.AgentID),
+		zap.String("mission_type", req.MissionType),
+		zap.String("mission_name", req.MissionName))
 
 	m.scanMission(mission, missionDesc, projectName, runnerID, sessionID, resultSummary, completedAt)
 	return mission, nil
