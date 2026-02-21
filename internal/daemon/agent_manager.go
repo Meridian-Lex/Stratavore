@@ -1,0 +1,601 @@
+package daemon
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/meridian-lex/stratavore/pkg/api"
+	"go.uber.org/zap"
+)
+
+// AgentManager handles fleet agent personality and career progression operations
+type AgentManager struct {
+	db     *sql.DB
+	logger *zap.Logger
+}
+
+// NewAgentManager creates a new agent manager
+func NewAgentManager(db *sql.DB, logger *zap.Logger) *AgentManager {
+	return &AgentManager{
+		db:     db,
+		logger: logger,
+	}
+}
+
+// RegisterAgent creates a new agent personality with default rank (Unranked = 0)
+func (m *AgentManager) RegisterAgent(ctx context.Context, req *api.RegisterAgentRequest) (*api.AgentPersonality, error) {
+	if req.AgentName == "" {
+		return nil, fmt.Errorf("agent_name required")
+	}
+
+	// Check if agent name already exists
+	var exists bool
+	err := m.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_personalities WHERE agent_name = $1)", req.AgentName).Scan(&exists)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check agent name: %w", err)
+	}
+	if exists {
+		return nil, fmt.Errorf("agent name already registered: %s", req.AgentName)
+	}
+
+	agentID := uuid.New().String()
+	now := time.Now()
+
+	// Insert agent personality
+	_, err = m.db.ExecContext(ctx, `
+		INSERT INTO agent_personalities (
+			id, agent_name, personality_traits, current_rank, rank_progress, strikes,
+			created_at, last_active_at, updated_at
+		) VALUES ($1, $2, $3, 0, 0, 0, $4, $4, $4)
+	`, agentID, req.AgentName, req.PersonalityTraits, now)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to register agent: %w", err)
+	}
+
+	m.logger.Info("agent registered",
+		zap.String("agent_id", agentID),
+		zap.String("agent_name", req.AgentName))
+
+	return m.GetAgent(ctx, agentID)
+}
+
+// GetAgent retrieves an agent personality by ID
+func (m *AgentManager) GetAgent(ctx context.Context, agentID string) (*api.AgentPersonality, error) {
+	row := m.db.QueryRowContext(ctx, `
+		SELECT id, agent_name, specialization, personality_traits,
+		       current_rank, rank_progress, strikes,
+		       total_missions, successful_missions, failed_missions,
+		       total_tokens_used, total_runtime_hours,
+		       created_at, last_active_at, updated_at
+		FROM agent_personalities
+		WHERE id = $1
+	`, agentID)
+
+	agent := &api.AgentPersonality{}
+	var specialization, lastActiveAt sql.NullString
+	var personalityTraits []byte
+
+	err := row.Scan(
+		&agent.ID,
+		&agent.AgentName,
+		&specialization,
+		&personalityTraits,
+		&agent.CurrentRank,
+		&agent.RankProgress,
+		&agent.Strikes,
+		&agent.TotalMissions,
+		&agent.SuccessfulMissions,
+		&agent.FailedMissions,
+		&agent.TotalTokensUsed,
+		&agent.TotalRuntimeHours,
+		&agent.CreatedAt,
+		&lastActiveAt,
+		&agent.UpdatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("agent not found: %s", agentID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get agent: %w", err)
+	}
+
+	if specialization.Valid {
+		agent.Specialization = specialization.String
+	}
+	if lastActiveAt.Valid {
+		agent.LastActiveAt = lastActiveAt.String
+	}
+
+	return agent, nil
+}
+
+// ListAgents retrieves all agent personalities, ordered by rank descending
+func (m *AgentManager) ListAgents(ctx context.Context, limit, offset int32) ([]*api.AgentPersonality, int32, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	// Get total count
+	var total int32
+	err := m.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM agent_personalities").Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count agents: %w", err)
+	}
+
+	// Get agents
+	rows, err := m.db.QueryContext(ctx, `
+		SELECT id, agent_name, specialization, personality_traits,
+		       current_rank, rank_progress, strikes,
+		       total_missions, successful_missions, failed_missions,
+		       total_tokens_used, total_runtime_hours,
+		       created_at, last_active_at, updated_at
+		FROM agent_personalities
+		ORDER BY current_rank DESC, rank_progress DESC, created_at ASC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list agents: %w", err)
+	}
+	defer rows.Close()
+
+	agents := []*api.AgentPersonality{}
+	for rows.Next() {
+		agent := &api.AgentPersonality{}
+		var specialization, lastActiveAt sql.NullString
+		var personalityTraits []byte
+
+		err := rows.Scan(
+			&agent.ID,
+			&agent.AgentName,
+			&specialization,
+			&personalityTraits,
+			&agent.CurrentRank,
+			&agent.RankProgress,
+			&agent.Strikes,
+			&agent.TotalMissions,
+			&agent.SuccessfulMissions,
+			&agent.FailedMissions,
+			&agent.TotalTokensUsed,
+			&agent.TotalRuntimeHours,
+			&agent.CreatedAt,
+			&lastActiveAt,
+			&agent.UpdatedAt,
+		)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to scan agent: %w", err)
+		}
+
+		if specialization.Valid {
+			agent.Specialization = specialization.String
+		}
+		if lastActiveAt.Valid {
+			agent.LastActiveAt = lastActiveAt.String
+		}
+
+		agents = append(agents, agent)
+	}
+
+	return agents, total, nil
+}
+
+// UpdateAgent updates agent personality traits or specialization
+func (m *AgentManager) UpdateAgent(ctx context.Context, req *api.UpdateAgentRequest) (*api.AgentPersonality, error) {
+	// Verify agent exists
+	_, err := m.GetAgent(ctx, req.AgentID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build dynamic update query
+	if req.PersonalityTraits != nil {
+		_, err = m.db.ExecContext(ctx, `
+			UPDATE agent_personalities
+			SET personality_traits = $1, updated_at = NOW()
+			WHERE id = $2
+		`, req.PersonalityTraits, req.AgentID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to update personality traits: %w", err)
+		}
+	}
+
+	if req.Specialization != nil {
+		_, err = m.db.ExecContext(ctx, `
+			UPDATE agent_personalities
+			SET specialization = $1, updated_at = NOW()
+			WHERE id = $2
+		`, *req.Specialization, req.AgentID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to update specialization: %w", err)
+		}
+	}
+
+	return m.GetAgent(ctx, req.AgentID)
+}
+
+// CommendAgent awards commendation points and checks for promotion
+func (m *AgentManager) CommendAgent(ctx context.Context, req *api.CommendAgentRequest) (bool, int, error) {
+	if req.Achievement == "" {
+		return false, 0, fmt.Errorf("achievement required")
+	}
+	if req.Points <= 0 {
+		req.Points = 1 // Default to 1 point
+	}
+
+	tx, err := m.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, 0, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Get current agent state
+	var agentID, agentName string
+	var currentRank, rankProgress int
+	err = tx.QueryRowContext(ctx, `
+		SELECT id, agent_name, current_rank, rank_progress
+		FROM agent_personalities
+		WHERE id = $1
+		FOR UPDATE
+	`, req.AgentID).Scan(&agentID, &agentName, &currentRank, &rankProgress)
+
+	if err == sql.ErrNoRows {
+		return false, 0, fmt.Errorf("agent not found: %s", req.AgentID)
+	}
+	if err != nil {
+		return false, 0, fmt.Errorf("failed to get agent: %w", err)
+	}
+
+	// Award commendation points
+	newProgress := rankProgress + req.Points
+	_, err = tx.ExecContext(ctx, `
+		UPDATE agent_personalities
+		SET rank_progress = rank_progress + $1, updated_at = NOW()
+		WHERE id = $2
+	`, req.Points, req.AgentID)
+	if err != nil {
+		return false, 0, fmt.Errorf("failed to update rank progress: %w", err)
+	}
+
+	// Record commendation event
+	awardedBy := req.AwardedBy
+	if awardedBy == "" {
+		awardedBy = "System"
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO agent_rank_events (
+			agent_id, event_type, rank_before, points_awarded,
+			achievement, awarded_by, mission_id, related_pr, created_at
+		) VALUES ($1, 'commendation', $2, $3, $4, $5, $6, $7, NOW())
+	`, req.AgentID, currentRank, req.Points, req.Achievement, awardedBy, sql.NullString{String: req.MissionID, Valid: req.MissionID != ""}, sql.NullString{String: req.RelatedPR, Valid: req.RelatedPR != ""})
+
+	if err != nil {
+		return false, 0, fmt.Errorf("failed to record commendation: %w", err)
+	}
+
+	// Check for promotion (5 points triggers promotion)
+	promoted := false
+	newRank := currentRank
+	if newProgress >= 5 && currentRank < 10 {
+		promoted = true
+		newRank = currentRank + 1
+
+		_, err = tx.ExecContext(ctx, `
+			UPDATE agent_personalities
+			SET current_rank = $1, rank_progress = 0, updated_at = NOW()
+			WHERE id = $2
+		`, newRank, req.AgentID)
+		if err != nil {
+			return false, 0, fmt.Errorf("failed to promote agent: %w", err)
+		}
+
+		// Record promotion event
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO agent_rank_events (
+				agent_id, event_type, rank_before, rank_after,
+				achievement, awarded_by, created_at
+			) VALUES ($1, 'promotion', $2, $3, $4, $5, NOW())
+		`, req.AgentID, currentRank, newRank, fmt.Sprintf("Promoted from rank %d to rank %d", currentRank, newRank), awardedBy)
+		if err != nil {
+			return false, 0, fmt.Errorf("failed to record promotion: %w", err)
+		}
+
+		m.logger.Info("agent promoted",
+			zap.String("agent_id", agentID),
+			zap.String("agent_name", agentName),
+			zap.Int("old_rank", currentRank),
+			zap.Int("new_rank", newRank))
+	}
+
+	if err := tx.Commit(); err != nil {
+		return false, 0, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return promoted, newRank, nil
+}
+
+// StrikeAgent issues a strike and checks for demotion (3 strikes = demotion)
+func (m *AgentManager) StrikeAgent(ctx context.Context, req *api.StrikeAgentRequest) (bool, int, error) {
+	if req.Infraction == "" {
+		return false, 0, fmt.Errorf("infraction required")
+	}
+
+	tx, err := m.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, 0, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Get current agent state
+	var agentID, agentName string
+	var currentRank, strikes int
+	err = tx.QueryRowContext(ctx, `
+		SELECT id, agent_name, current_rank, strikes
+		FROM agent_personalities
+		WHERE id = $1
+		FOR UPDATE
+	`, req.AgentID).Scan(&agentID, &agentName, &currentRank, &strikes)
+
+	if err == sql.ErrNoRows {
+		return false, 0, fmt.Errorf("agent not found: %s", req.AgentID)
+	}
+	if err != nil {
+		return false, 0, fmt.Errorf("failed to get agent: %w", err)
+	}
+
+	// Increment strike count
+	newStrikes := strikes + 1
+	_, err = tx.ExecContext(ctx, `
+		UPDATE agent_personalities
+		SET strikes = strikes + 1, updated_at = NOW()
+		WHERE id = $1
+	`, req.AgentID)
+	if err != nil {
+		return false, 0, fmt.Errorf("failed to update strikes: %w", err)
+	}
+
+	// Record strike event
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO agent_rank_events (
+			agent_id, event_type, rank_before, infraction, awarded_by, mission_id, created_at
+		) VALUES ($1, 'strike', $2, $3, 'System', $4, NOW())
+	`, req.AgentID, currentRank, req.Infraction, sql.NullString{String: req.MissionID, Valid: req.MissionID != ""})
+
+	if err != nil {
+		return false, 0, fmt.Errorf("failed to record strike: %w", err)
+	}
+
+	// Check for demotion (3 strikes triggers demotion)
+	demoted := false
+	newRank := currentRank
+	if newStrikes >= 3 && currentRank > 0 {
+		demoted = true
+		newRank = currentRank - 1
+
+		_, err = tx.ExecContext(ctx, `
+			UPDATE agent_personalities
+			SET current_rank = $1, strikes = 0, updated_at = NOW()
+			WHERE id = $2
+		`, newRank, req.AgentID)
+		if err != nil {
+			return false, 0, fmt.Errorf("failed to demote agent: %w", err)
+		}
+
+		// Record demotion event
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO agent_rank_events (
+				agent_id, event_type, rank_before, rank_after,
+				infraction, awarded_by, created_at
+			) VALUES ($1, 'demotion', $2, $3, $4, 'System', NOW())
+		`, req.AgentID, currentRank, newRank, fmt.Sprintf("Demoted from rank %d to rank %d due to 3 strikes", currentRank, newRank))
+		if err != nil {
+			return false, 0, fmt.Errorf("failed to record demotion: %w", err)
+		}
+
+		m.logger.Warn("agent demoted",
+			zap.String("agent_id", agentID),
+			zap.String("agent_name", agentName),
+			zap.Int("old_rank", currentRank),
+			zap.Int("new_rank", newRank),
+			zap.String("infraction", req.Infraction))
+	}
+
+	if err := tx.Commit(); err != nil {
+		return false, 0, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return demoted, newRank, nil
+}
+
+// ListAgentMissions retrieves mission history for an agent
+func (m *AgentManager) ListAgentMissions(ctx context.Context, agentID string, limit, offset int32) ([]*api.AgentMission, int32, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	// Get total count
+	var total int32
+	err := m.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM agent_missions WHERE agent_id = $1", agentID).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count missions: %w", err)
+	}
+
+	// Get missions
+	rows, err := m.db.QueryContext(ctx, `
+		SELECT id, agent_id, mission_type, mission_name, mission_description,
+		       project_name, runner_id, session_id, status, result_summary,
+		       tokens_used, runtime_hours, started_at, completed_at, created_at
+		FROM agent_missions
+		WHERE agent_id = $1
+		ORDER BY started_at DESC
+		LIMIT $2 OFFSET $3
+	`, agentID, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list missions: %w", err)
+	}
+	defer rows.Close()
+
+	missions := []*api.AgentMission{}
+	for rows.Next() {
+		mission := &api.AgentMission{}
+		var missionDesc, projectName, runnerID, sessionID, resultSummary, completedAt sql.NullString
+
+		err := rows.Scan(
+			&mission.ID,
+			&mission.AgentID,
+			&mission.MissionType,
+			&mission.MissionName,
+			&missionDesc,
+			&projectName,
+			&runnerID,
+			&sessionID,
+			&mission.Status,
+			&resultSummary,
+			&mission.TokensUsed,
+			&mission.RuntimeHours,
+			&mission.StartedAt,
+			&completedAt,
+			&mission.CreatedAt,
+		)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to scan mission: %w", err)
+		}
+
+		if missionDesc.Valid {
+			mission.MissionDescription = missionDesc.String
+		}
+		if projectName.Valid {
+			mission.ProjectName = projectName.String
+		}
+		if runnerID.Valid {
+			mission.RunnerID = runnerID.String
+		}
+		if sessionID.Valid {
+			mission.SessionID = sessionID.String
+		}
+		if resultSummary.Valid {
+			mission.ResultSummary = resultSummary.String
+		}
+		if completedAt.Valid {
+			mission.CompletedAt = completedAt.String
+		}
+
+		missions = append(missions, mission)
+	}
+
+	return missions, total, nil
+}
+
+// CreateMission records a new mission for an agent
+func (m *AgentManager) CreateMission(ctx context.Context, req *api.CreateMissionRequest) (*api.AgentMission, error) {
+	if req.MissionType == "" {
+		return nil, fmt.Errorf("mission_type required")
+	}
+	if req.MissionName == "" {
+		return nil, fmt.Errorf("mission_name required")
+	}
+
+	// Verify agent exists
+	_, err := m.GetAgent(ctx, req.AgentID)
+	if err != nil {
+		return nil, err
+	}
+
+	missionID := uuid.New().String()
+	now := time.Now()
+
+	_, err = m.db.ExecContext(ctx, `
+		INSERT INTO agent_missions (
+			id, agent_id, mission_type, mission_name, mission_description,
+			project_name, runner_id, session_id, status, started_at, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'in_progress', $9, $9)
+	`,
+		missionID,
+		req.AgentID,
+		req.MissionType,
+		req.MissionName,
+		sql.NullString{String: req.MissionDescription, Valid: req.MissionDescription != ""},
+		sql.NullString{String: req.ProjectName, Valid: req.ProjectName != ""},
+		sql.NullString{String: req.RunnerID, Valid: req.RunnerID != ""},
+		sql.NullString{String: req.SessionID, Valid: req.SessionID != ""},
+		now,
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to create mission: %w", err)
+	}
+
+	// Increment total_missions counter
+	_, err = m.db.ExecContext(ctx, `
+		UPDATE agent_personalities
+		SET total_missions = total_missions + 1, last_active_at = NOW(), updated_at = NOW()
+		WHERE id = $1
+	`, req.AgentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update agent mission count: %w", err)
+	}
+
+	m.logger.Info("mission created",
+		zap.String("mission_id", missionID),
+		zap.String("agent_id", req.AgentID),
+		zap.String("mission_type", req.MissionType),
+		zap.String("mission_name", req.MissionName))
+
+	// Retrieve and return the created mission
+	row := m.db.QueryRowContext(ctx, `
+		SELECT id, agent_id, mission_type, mission_name, mission_description,
+		       project_name, runner_id, session_id, status, result_summary,
+		       tokens_used, runtime_hours, started_at, completed_at, created_at
+		FROM agent_missions
+		WHERE id = $1
+	`, missionID)
+
+	mission := &api.AgentMission{}
+	var missionDesc, projectName, runnerID, sessionID, resultSummary, completedAt sql.NullString
+
+	err = row.Scan(
+		&mission.ID,
+		&mission.AgentID,
+		&mission.MissionType,
+		&mission.MissionName,
+		&missionDesc,
+		&projectName,
+		&runnerID,
+		&sessionID,
+		&mission.Status,
+		&resultSummary,
+		&mission.TokensUsed,
+		&mission.RuntimeHours,
+		&mission.StartedAt,
+		&completedAt,
+		&mission.CreatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve created mission: %w", err)
+	}
+
+	if missionDesc.Valid {
+		mission.MissionDescription = missionDesc.String
+	}
+	if projectName.Valid {
+		mission.ProjectName = projectName.String
+	}
+	if runnerID.Valid {
+		mission.RunnerID = runnerID.String
+	}
+	if sessionID.Valid {
+		mission.SessionID = sessionID.String
+	}
+	if resultSummary.Valid {
+		mission.ResultSummary = resultSummary.String
+	}
+	if completedAt.Valid {
+		mission.CompletedAt = completedAt.String
+	}
+
+	return mission, nil
+}
