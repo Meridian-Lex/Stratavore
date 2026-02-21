@@ -8,6 +8,7 @@
 BINARY_NAME=stratavore
 DAEMON_NAME=stratavored
 AGENT_NAME=stratavore-agent
+MIGRATE_NAME=stratavore-migrate
 VERSION?=$(shell cat VERSION 2>/dev/null | tr -d '[:space:]' || echo "dev")
 BUILD_TIME=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
 COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
@@ -53,6 +54,8 @@ build:
 	@echo "[OK] bin/${DAEMON_NAME}"
 	go build ${LDFLAGS} -o bin/${AGENT_NAME} ./cmd/stratavore-agent
 	@echo "[OK] bin/${AGENT_NAME}"
+	go build ${LDFLAGS} -o bin/${MIGRATE_NAME} ./cmd/stratavore-migrate
+	@echo "[OK] bin/${MIGRATE_NAME}"
 	@echo ""
 	@echo "Build complete! Binaries in bin/"
 
@@ -61,6 +64,7 @@ quick:
 	@go build -o bin/${BINARY_NAME} ./cmd/stratavore
 	@go build -o bin/${DAEMON_NAME} ./cmd/stratavored
 	@go build -o bin/${AGENT_NAME} ./cmd/stratavore-agent
+	@go build -o bin/${MIGRATE_NAME} ./cmd/stratavore-migrate
 	@echo "Quick build complete"
 
 install: build
@@ -68,9 +72,11 @@ install: build
 	sudo cp bin/${BINARY_NAME} /usr/local/bin/
 	sudo cp bin/${DAEMON_NAME} /usr/local/bin/
 	sudo cp bin/${AGENT_NAME} /usr/local/bin/
+	sudo cp bin/${MIGRATE_NAME} /usr/local/bin/
 	sudo chmod +x /usr/local/bin/${BINARY_NAME}
 	sudo chmod +x /usr/local/bin/${DAEMON_NAME}
 	sudo chmod +x /usr/local/bin/${AGENT_NAME}
+	sudo chmod +x /usr/local/bin/${MIGRATE_NAME}
 	@echo "Creating config directory..."
 	mkdir -p ~/.config/stratavore
 	@echo "Installation complete!"
@@ -164,7 +170,7 @@ help:
 	@echo "  all                  - Generate protobuf and build all components (default)"
 	@echo "  deps                 - Download dependencies"
 	@echo "  proto                - Generate protobuf Go code (auto-detects tools)"
-	@echo "  build                - Build CLI, daemon, and agent"
+	@echo "  build                - Build CLI, daemon, agent, and migrate tools"
 	@echo "  quick                - Quick build without protobuf (development)"
 	@echo "  install              - Install binaries to /usr/local/bin"
 	@echo "  clean                - Remove build artifacts"

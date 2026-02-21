@@ -121,6 +121,25 @@ jobs:
           sed -i "s/Version   = \"[^\"]*\"/Version   = \"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore-migrate/main.go
           echo "Updated cmd/stratavore-migrate/main.go"
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build binaries for verification
+        run: make build
+
+      - name: Verify bin/ artifacts
+        run: |
+          echo "Verifying bin/ artifacts..."
+          ls -lh bin/
+          test -f bin/stratavore || (echo "bin/stratavore not found" && exit 1)
+          test -f bin/stratavored || (echo "bin/stratavored not found" && exit 1)
+          test -f bin/stratavore-agent || (echo "bin/stratavore-agent not found" && exit 1)
+          test -f bin/stratavore-migrate || (echo "bin/stratavore-migrate not found" && exit 1)
+          echo "All artifacts verified"
+
       - name: Verify version updates
         run: |
           echo "=== VERSION file ==="
