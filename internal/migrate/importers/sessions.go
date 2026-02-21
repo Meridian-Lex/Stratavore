@@ -14,11 +14,8 @@ import (
 // ImportSessions imports V2 sessions into the sessions and session_blobs tables
 // V2 sessions are not resumable in V3, so resumable=false for all imports
 // Returns the number of sessions processed
-// NOTE: Currently skipping V2 sessions due to schema mismatch (no project_name field)
+// Sessions without project_name are skipped (schema mismatch in test data)
 func ImportSessions(ctx context.Context, tx pgx.Tx, v2Sessions []parsers.V2Session) (int, error) {
-	// Skip V2 sessions - they are test data without project_name field
-	fmt.Printf("  ⚠️  Skipping %d V2 sessions (schema mismatch - no project_name)\n", len(v2Sessions))
-	return 0, nil
 	runnerQuery := `
 		INSERT INTO runners (
 			id, runtime_type, runtime_id, project_name, project_path,
