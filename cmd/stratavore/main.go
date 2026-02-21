@@ -353,17 +353,52 @@ func showRunnerPicker(runners []*types.Runner, projectName string, ctx context.C
 }
 
 func launchNewRunner(ctx context.Context, db *storage.PostgresClient, projectName string, cfg *config.Config) {
-	// This would typically communicate with the daemon via gRPC
-	// For now, just show what would happen
+	// Get project details from database
+	project, err := db.GetProject(ctx, projectName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: Project not found: %s\n", projectName)
+		os.Exit(1)
+	}
 
-	fmt.Println("Would launch runner with daemon...")
-	fmt.Printf("  Project: %s\n", projectName)
-	if godMode {
-		fmt.Println("  Mode: GOD MODE (full access)")
+	// Create API client
+	apiClient := getAPIClient()
+
+	// Check if daemon is running
+	if err := apiClient.Ping(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: Daemon not running. Start with: stratavored\n")
+		os.Exit(1)
 	}
-	if preset != "" {
-		fmt.Printf("  Preset: %s\n", preset)
+
+	// Build launch request
+	req := &api.LaunchRunnerRequest{
+		ProjectName:      projectName,
+		ProjectPath:      project.Path,
+		ConversationMode: "new",
+		RuntimeType:      "process",
 	}
+
+	// Note: flags from command line would be available from the context
+	// For the interactive launcher, we use defaults (conversation_mode=new)
+
+	fmt.Printf("Launching runner for project '%s'...\n", projectName)
+
+	// Call daemon to launch runner
+	resp, err := apiClient.LaunchRunner(ctx, req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if resp.Error != "" {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Error)
+		os.Exit(1)
+	}
+
+	// Print success message
+	fmt.Printf("Runner started: %s\n", resp.Runner.ID)
+	fmt.Printf("  Status: %s\n", resp.Runner.Status)
+	fmt.Printf("  Project: %s\n", resp.Runner.ProjectName)
+	fmt.Printf("\nUse 'stratavore attach %s' to connect\n", resp.Runner.ID)
 }
 
 var newCmd = &cobra.Command{
