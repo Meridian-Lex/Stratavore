@@ -174,4 +174,4 @@ Original PR: #${{ github.event.pull_request.number }} (${{ github.event.pull_req
           echo "Current:  ${{ steps.new_version.outputs.version }}"
           echo "Type:     ${{ steps.bump_type.outputs.type }}"
           echo "PR:       ${{ github.event.pull_request.number }}"
-          echo "Title:    ${{ github.event.pull_request.title }}"
+          echo "Title:    $PR_TITLE"
