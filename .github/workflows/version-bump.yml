@@ -45,8 +45,8 @@ jobs:
           COMMIT_MSG="$PR_TITLE"
           PR_BODY_TEXT="$PR_BODY"
 
-          if echo "$COMMIT_MSG" | grep -qiE "^BREAKING CHANGE:|breaking change:" || \
-             echo "$PR_BODY_TEXT" | grep -qiE "^BREAKING CHANGE:|breaking change:"; then
+          if echo "$COMMIT_MSG" | grep -qiE "^BREAKING CHANGE:" || \
+             echo "$PR_BODY_TEXT" | grep -qiE "^BREAKING CHANGE:"; then
             BUMP_TYPE="major"
           elif echo "$COMMIT_MSG" | grep -qiE "^feat(\(.+\))?:|^feature:"; then
             BUMP_TYPE="minor"
@@ -62,7 +62,9 @@ jobs:
 
       - name: Output bump type
         # ISSUE #4: Move echo statement to separate step after bump_type completes
-        run: echo "Bump type: ${{ steps.bump_type.outputs.type }}"
+        # ISSUE #6: Use block scalar to prevent YAML parse error
+        run: |
+          echo "Bump type: ${{ steps.bump_type.outputs.type }}"
 
       - name: Bump version
         id: new_version
@@ -100,25 +102,25 @@ jobs:
       - name: Update version in stratavored
         run: |
           # ISSUE #8: Robust sed patterns - handle variable whitespace
-          sed -i "s/Version[[:space:]]*=[[:space:]]*\"[^\"]*\"/Version   = \"${{ steps.new_version.outputs.version }}\"/" cmd/stratavored/main.go
+          sed -i -E "s/(Version[[:space:]]*=[[:space:]]*)\"[^\"]*\"/\1\"${{ steps.new_version.outputs.version }}\"/" cmd/stratavored/main.go
           echo "Updated cmd/stratavored/main.go"
 
       - name: Update version in stratavore CLI
         run: |
           # ISSUE #8: Robust sed patterns - handle variable whitespace
-          sed -i "s/Version[[:space:]]*=[[:space:]]*\"[^\"]*\"/Version   = \"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore/main.go
+          sed -i -E "s/(Version[[:space:]]*=[[:space:]]*)\"[^\"]*\"/\1\"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore/main.go
           echo "Updated cmd/stratavore/main.go"
 
       - name: Update version in stratavore-agent
         run: |
           # ISSUE #8: Robust sed patterns - handle variable whitespace
-          sed -i "s/Version[[:space:]]*=[[:space:]]*\"[^\"]*\"/Version     = \"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore-agent/main.go
+          sed -i -E "s/(Version[[:space:]]*=[[:space:]]*)\"[^\"]*\"/\1\"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore-agent/main.go
           echo "Updated cmd/stratavore-agent/main.go"
 
       - name: Update version in stratavore-migrate
         run: |
           # ISSUE #8: Robust sed patterns - handle variable whitespace
-          sed -i "s/Version[[:space:]]*=[[:space:]]*\"[^\"]*\"/Version   = \"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore-migrate/main.go
+          sed -i -E "s/(Version[[:space:]]*=[[:space:]]*)\"[^\"]*\"/\1\"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore-migrate/main.go
           echo "Updated cmd/stratavore-migrate/main.go"
 
       - name: Verify version updates
@@ -127,16 +129,16 @@ jobs:
           cat VERSION
           echo ""
           echo "=== stratavored version ==="
-          grep 'Version   =' cmd/stratavored/main.go
+          grep -E 'Version[[:space:]]*=[[:space:]]*"' cmd/stratavored/main.go
           echo ""
           echo "=== stratavore version ==="
-          grep 'Version   =' cmd/stratavore/main.go
+          grep -E 'Version[[:space:]]*=[[:space:]]*"' cmd/stratavore/main.go
           echo ""
           echo "=== stratavore-agent version ==="
-          grep 'Version     =' cmd/stratavore-agent/main.go
+          grep -E 'Version[[:space:]]*=[[:space:]]*"' cmd/stratavore-agent/main.go
           echo ""
           echo "=== stratavore-migrate version ==="
-          grep 'Version   =' cmd/stratavore-migrate/main.go
+          grep -E 'Version[[:space:]]*=[[:space:]]*"' cmd/stratavore-migrate/main.go
 
       - name: Build binaries
         uses: actions/setup-go@v5
