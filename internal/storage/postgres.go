@@ -1273,3 +1273,153 @@ func (c *PostgresClient) CompleteSprintExecution(ctx context.Context, execID, st
 	`, status, completed, failed, tokensIn, tokensOut, costUSD, durationMs, execID)
 	return err
 }
+
+// GetOperationalMode retrieves the current operational mode from daemon state
+func (c *PostgresClient) GetOperationalMode(ctx context.Context) (string, string, error) {
+	var configJSON []byte
+	err := c.pool.QueryRow(ctx, `
+		SELECT config FROM daemon_state WHERE singleton = true
+	`).Scan(&configJSON)
+
+	if err == pgx.ErrNoRows {
+		// No daemon state yet, return default
+		return "IDLE", "", nil
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("query daemon_state: %w", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(configJSON, &config); err != nil {
+		return "", "", fmt.Errorf("unmarshal config: %w", err)
+	}
+
+	mode, _ := config["operational_mode"].(string)
+	description, _ := config["mode_description"].(string)
+
+	if mode == "" {
+		mode = "IDLE"
+	}
+
+	return mode, description, nil
+}
+
+// SetOperationalMode updates the operational mode in daemon state
+func (c *PostgresClient) SetOperationalMode(ctx context.Context, mode, description string) error {
+	// Upsert daemon state with mode in config JSONB
+	_, err := c.pool.Exec(ctx, `
+		INSERT INTO daemon_state (singleton, daemon_id, hostname, version, started_at, last_heartbeat, config)
+		VALUES (
+			true,
+			gen_random_uuid(),
+			'stratavore-cli',
+			'1.4.0',
+			NOW(),
+			NOW(),
+			jsonb_build_object('operational_mode', $1, 'mode_description', $2)
+		)
+		ON CONFLICT (singleton) DO UPDATE
+		SET config = jsonb_set(
+			jsonb_set(
+				daemon_state.config,
+				'{operational_mode}',
+				to_jsonb($1::text)
+			),
+			'{mode_description}',
+			to_jsonb($2::text)
+		),
+		last_heartbeat = NOW()
+	`, mode, description)
+
+	return err
+}
+
+// ListAllSessions returns all sessions across all projects with their token usage
+func (c *PostgresClient) ListAllSessions(ctx context.Context) ([]*types.Session, error) {
+	query := `
+		SELECT id, runner_id, project_name, started_at, last_message_at,
+		       message_count, tokens_used, summary, created_at
+		FROM sessions
+		ORDER BY started_at DESC
+	`
+
+	rows, err := c.pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sessions []*types.Session
+	for rows.Next() {
+		var s types.Session
+		var lastMessageAt sql.NullTime
+		var summary sql.NullString
+
+		err := rows.Scan(
+			&s.ID,
+			&s.RunnerID,
+			&s.ProjectName,
+			&s.StartedAt,
+			&lastMessageAt,
+			&s.MessageCount,
+			&s.TokensUsed,
+			&summary,
+			&s.CreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		if lastMessageAt.Valid {
+			s.LastMessageAt = &lastMessageAt.Time
+		}
+		if summary.Valid {
+			s.Summary = summary.String
+		}
+
+		sessions = append(sessions, &s)
+	}
+
+	return sessions, rows.Err()
+}
+
+// GetDailyTokenBudget retrieves the current daily token budget
+func (c *PostgresClient) GetDailyTokenBudget(ctx context.Context) (*types.TokenBudget, error) {
+	query := `
+		SELECT id, scope, scope_id, limit_tokens, used_tokens,
+		       period_granularity, period_start, period_end
+		FROM token_budgets
+		WHERE scope = 'global'
+		  AND period_granularity = 'daily'
+		  AND period_end > NOW()
+		ORDER BY period_start DESC
+		LIMIT 1
+	`
+
+	var budget types.TokenBudget
+	var scopeIDVal sql.NullString
+
+	err := c.pool.QueryRow(ctx, query).Scan(
+		&budget.ID,
+		&budget.Scope,
+		&scopeIDVal,
+		&budget.LimitTokens,
+		&budget.UsedTokens,
+		&budget.PeriodGranularity,
+		&budget.PeriodStart,
+		&budget.PeriodEnd,
+	)
+
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil // No budget configured
+		}
+		return nil, err
+	}
+
+	if scopeIDVal.Valid {
+		budget.ScopeID = scopeIDVal.String
+	}
+
+	return &budget, nil
+}

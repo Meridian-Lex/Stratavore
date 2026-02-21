@@ -152,6 +152,72 @@ type GetSessionResponse struct {
 	Error   string         `json:"error,omitempty"`
 }
 
+type GetTokensRequest struct{}
+
+type GetTokensResponse struct {
+	TotalTokensUsed int64            `json:"totalTokensUsed"`
+	TokensByProject map[string]int64 `json:"tokensByProject"`
+	DailyLimit      int64            `json:"dailyLimit"`
+	UsagePercentage float64          `json:"usagePercentage"`
+	Error           string           `json:"error,omitempty"`
+}
+
+type GetModeRequest struct{}
+
+type GetModeResponse struct {
+	Mode        string `json:"mode"`
+	Description string `json:"description,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
+type SetModeRequest struct {
+	Mode        string `json:"mode"`
+	Description string `json:"description,omitempty"`
+}
+
+type SetModeResponse struct {
+	Success bool   `json:"success"`
+	Mode    string `json:"mode"`
+	Error   string `json:"error,omitempty"`
+}
+
+type GetConfigRequest struct{}
+
+type GetConfigResponse struct {
+	Database      DatabaseDisplayConfig      `json:"database"`
+	Daemon        DaemonDisplayConfig        `json:"daemon"`
+	Observability ObservabilityDisplayConfig `json:"observability"`
+	Error         string                     `json:"error,omitempty"`
+}
+
+type DatabaseDisplayConfig struct {
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Database string `json:"database"`
+}
+
+type DaemonDisplayConfig struct {
+	HTTPPort int `json:"http_port"`
+	GRPCPort int `json:"grpc_port"`
+}
+
+type ObservabilityDisplayConfig struct {
+	LogLevel string `json:"log_level"`
+}
+
+type GetStateRequest struct{}
+
+type GetStateResponse struct {
+	OperationalMode string `json:"operational_mode"`
+	DaemonStatus    string `json:"daemon_status"`
+	Uptime          string `json:"uptime"`
+	ActiveRunners   int32  `json:"active_runners"`
+	TotalProjects   int32  `json:"total_projects"`
+	TotalSessions   int32  `json:"total_sessions"`
+	TokensUsed      int64  `json:"tokens_used"`
+	Error           string `json:"error,omitempty"`
+}
+
 // ===== MODEL TYPES =====
 
 type Runner struct {
@@ -228,4 +294,52 @@ func ParseTime(s string) (time.Time, error) {
 		return time.Time{}, nil
 	}
 	return time.Parse(time.RFC3339, s)
+}
+
+// ===== Sprint API types =====
+
+type CreateSprintRequest struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	ProjectName string   `json:"project_name,omitempty"`
+	CreatedBy   string   `json:"created_by,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+}
+
+type CreateSprintResponse struct {
+	SprintID string `json:"sprint_id"`
+}
+
+type AddSprintTaskRequest struct {
+	SprintID       string   `json:"sprint_id"`
+	SequenceNumber int      `json:"sequence_number"`
+	DependsOn      []string `json:"depends_on,omitempty"`
+	Name           string   `json:"name"`
+	Description    string   `json:"description,omitempty"`
+	ModelName      string   `json:"model_name"`
+	SystemPrompt   string   `json:"system_prompt,omitempty"`
+	UserPrompt     string   `json:"user_prompt"`
+	MaxTokens      int      `json:"max_tokens,omitempty"`
+	Temperature    float64  `json:"temperature,omitempty"`
+}
+
+type UpdateSprintStatusRequest struct {
+	SprintID string `json:"sprint_id"`
+	Status   string `json:"status"`
+}
+
+type UpdateTaskResultRequest struct {
+	TaskID        string                 `json:"task_id"`
+	Status        string                 `json:"status"`
+	ResultSummary string                 `json:"result_summary,omitempty"`
+	ResultData    map[string]interface{} `json:"result_data,omitempty"`
+	TokensInput   int64                  `json:"tokens_input,omitempty"`
+	TokensOutput  int64                  `json:"tokens_output,omitempty"`
+	CostUSD       float64                `json:"cost_usd,omitempty"`
+	ErrorMessage  string                 `json:"error_message,omitempty"`
+}
+
+type UpdateModelRequest struct {
+	Enabled *bool                  `json:"enabled,omitempty"`
+	Config  map[string]interface{} `json:"config,omitempty"`
 }

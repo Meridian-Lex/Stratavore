@@ -279,6 +279,47 @@ func (s *GRPCServer) TriggerReconciliation(ctx context.Context, req *api.Trigger
 	}, nil
 }
 
+// GetTokens returns token usage metrics
+func (s *GRPCServer) GetTokens(ctx context.Context, req *api.GetTokensRequest) (*api.GetTokensResponse, error) {
+	// Query all sessions to get token usage by project
+	sessions, err := s.storage.ListAllSessions(ctx)
+	if err != nil {
+		s.logger.Error("failed to list sessions", zap.Error(err))
+		return &api.GetTokensResponse{
+			Error: err.Error(),
+		}, nil
+	}
+
+	// Aggregate tokens by project
+	totalTokens := int64(0)
+	tokensByProject := make(map[string]int64)
+
+	for _, session := range sessions {
+		totalTokens += session.TokensUsed
+		tokensByProject[session.ProjectName] += session.TokensUsed
+	}
+
+	// Get daily limit from token_budgets table
+	dailyLimit := int64(0)
+	budget, err := s.storage.GetDailyTokenBudget(ctx)
+	if err == nil && budget != nil {
+		dailyLimit = budget.LimitTokens
+	}
+
+	// Calculate usage percentage
+	usagePercentage := 0.0
+	if dailyLimit > 0 {
+		usagePercentage = (float64(totalTokens) / float64(dailyLimit)) * 100
+	}
+
+	return &api.GetTokensResponse{
+		TotalTokensUsed: totalTokens,
+		TokensByProject: tokensByProject,
+		DailyLimit:      dailyLimit,
+		UsagePercentage: usagePercentage,
+	}, nil
+}
+
 // Helper functions to convert between types
 
 func convertRunnerToAPI(r *types.Runner) *api.Runner {

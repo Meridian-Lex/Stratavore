@@ -89,6 +89,16 @@ func (c *Client) ListProjects(ctx context.Context, status string) (*api.ListProj
 	return &resp, err
 }
 
+// DeleteProject deletes a project
+func (c *Client) DeleteProject(ctx context.Context, projectName string) (*api.DeleteProjectResponse, error) {
+	req := &api.DeleteProjectRequest{
+		Name: projectName,
+	}
+	var resp api.DeleteProjectResponse
+	err := c.post(ctx, "/projects/delete", req, &resp)
+	return &resp, err
+}
+
 // SendHeartbeat sends heartbeat from agent
 func (c *Client) SendHeartbeat(ctx context.Context, req *api.HeartbeatRequest) (*api.HeartbeatResponse, error) {
 	var resp api.HeartbeatResponse
@@ -104,10 +114,64 @@ func (c *Client) GetStatus(ctx context.Context) (*api.GetStatusResponse, error) 
 	return &resp, err
 }
 
+// ListSessions lists sessions for a project
+func (c *Client) ListSessions(ctx context.Context, projectName string) (*api.ListSessionsResponse, error) {
+	var resp api.ListSessionsResponse
+	url := fmt.Sprintf("%s/sessions/list", c.baseURL)
+	if projectName != "" {
+		url += fmt.Sprintf("?project=%s", projectName)
+	}
+	err := c.get(ctx, url, &resp)
+	return &resp, err
+}
+
 // TriggerReconciliation manually triggers reconciliation
 func (c *Client) TriggerReconciliation(ctx context.Context) (*api.TriggerReconciliationResponse, error) {
 	var resp api.TriggerReconciliationResponse
 	err := c.post(ctx, "/reconcile", nil, &resp)
+	return &resp, err
+}
+
+// GetMode retrieves current operational mode
+func (c *Client) GetMode(ctx context.Context) (*api.GetModeResponse, error) {
+	var resp api.GetModeResponse
+	url := fmt.Sprintf("%s/mode/get", c.baseURL)
+	err := c.get(ctx, url, &resp)
+	return &resp, err
+}
+
+// SetMode updates operational mode
+func (c *Client) SetMode(ctx context.Context, mode, description string) (*api.SetModeResponse, error) {
+	req := &api.SetModeRequest{
+		Mode:        mode,
+		Description: description,
+	}
+	var resp api.SetModeResponse
+	err := c.post(ctx, "/mode/set", req, &resp)
+	return &resp, err
+}
+
+// GetConfig retrieves daemon configuration
+func (c *Client) GetConfig(ctx context.Context) (*api.GetConfigResponse, error) {
+	var resp api.GetConfigResponse
+	url := fmt.Sprintf("%s/config", c.baseURL)
+	err := c.get(ctx, url, &resp)
+	return &resp, err
+}
+
+// GetTokens retrieves token usage metrics
+func (c *Client) GetTokens(ctx context.Context) (*api.GetTokensResponse, error) {
+	var resp api.GetTokensResponse
+	url := fmt.Sprintf("%s/tokens", c.baseURL)
+	err := c.get(ctx, url, &resp)
+	return &resp, err
+}
+
+// GetState retrieves daemon state information
+func (c *Client) GetState(ctx context.Context) (*api.GetStateResponse, error) {
+	var resp api.GetStateResponse
+	url := fmt.Sprintf("%s/state", c.baseURL)
+	err := c.get(ctx, url, &resp)
 	return &resp, err
 }
 
