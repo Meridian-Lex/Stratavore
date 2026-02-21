@@ -570,13 +570,13 @@ func (a *AgentAdapter) personalityToCapabilities(personality string) []string {
 	}
 }
 
-func (a *AgentAdapter) respondEnvelope(w http.ResponseWriter, statusCode int, status, error string, data interface{}) {
+func (a *AgentAdapter) respondEnvelope(w http.ResponseWriter, statusCode int, status, errMsg string, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 
 	envelope := AgentEnvelope{
 		Status: status,
-		Error:  error,
+		Error:  errMsg,
 		Data:   data,
 	}
 
