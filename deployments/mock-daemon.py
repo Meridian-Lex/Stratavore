@@ -78,7 +78,7 @@ class MockDaemonHandler(BaseHTTPRequestHandler):
 
 def main():
     port = 8080
-    server = HTTPServer(("0.0.0.0", port), MockDaemonHandler)
+    server = HTTPServer(("127.0.0.1", port), MockDaemonHandler)
     logger.info(f"Mock Daemon running on port {port}")
     server.serve_forever()
 
