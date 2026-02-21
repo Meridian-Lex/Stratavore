@@ -2,23 +2,24 @@ package daemon
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/meridian-lex/stratavore/internal/storage"
 	"github.com/meridian-lex/stratavore/pkg/api"
 	"go.uber.org/zap"
 )
 
 // AgentManager handles fleet agent personality and career progression operations
 type AgentManager struct {
-	db     *sql.DB
+	db     *storage.PostgresClient
 	logger *zap.Logger
 }
 
 // NewAgentManager creates a new agent manager
-func NewAgentManager(db *sql.DB, logger *zap.Logger) *AgentManager {
+func NewAgentManager(db *storage.PostgresClient, logger *zap.Logger) *AgentManager {
 	return &AgentManager{
 		db:     db,
 		logger: logger,
@@ -33,7 +34,7 @@ func (m *AgentManager) RegisterAgent(ctx context.Context, req *api.RegisterAgent
 
 	// Check if agent name already exists
 	var exists bool
-	err := m.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_personalities WHERE agent_name = $1)", req.AgentName).Scan(&exists)
+	err := m.db.GetPool().QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM agent_personalities WHERE agent_name = $1)", req.AgentName).Scan(&exists)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check agent name: %w", err)
 	}
@@ -45,7 +46,7 @@ func (m *AgentManager) RegisterAgent(ctx context.Context, req *api.RegisterAgent
 	now := time.Now()
 
 	// Insert agent personality
-	_, err = m.db.ExecContext(ctx, `
+	_, err = m.db.GetPool().Exec(ctx, `
 		INSERT INTO agent_personalities (
 			id, agent_name, personality_traits, current_rank, rank_progress, strikes,
 			created_at, last_active_at, updated_at
@@ -65,7 +66,7 @@ func (m *AgentManager) RegisterAgent(ctx context.Context, req *api.RegisterAgent
 
 // GetAgent retrieves an agent personality by ID
 func (m *AgentManager) GetAgent(ctx context.Context, agentID string) (*api.AgentPersonality, error) {
-	row := m.db.QueryRowContext(ctx, `
+	row := m.db.GetPool().QueryRow(ctx, `
 		SELECT id, agent_name, specialization, personality_traits,
 		       current_rank, rank_progress, strikes,
 		       total_missions, successful_missions, failed_missions,
@@ -76,7 +77,8 @@ func (m *AgentManager) GetAgent(ctx context.Context, agentID string) (*api.Agent
 	`, agentID)
 
 	agent := &api.AgentPersonality{}
-	var specialization, lastActiveAt sql.NullString
+	var specialization *string
+	var lastActiveAt *time.Time
 	var personalityTraits []byte
 
 	err := row.Scan(
@@ -97,18 +99,18 @@ func (m *AgentManager) GetAgent(ctx context.Context, agentID string) (*api.Agent
 		&agent.UpdatedAt,
 	)
 
-	if err == sql.ErrNoRows {
+	if err == pgx.ErrNoRows {
 		return nil, fmt.Errorf("agent not found: %s", agentID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get agent: %w", err)
 	}
 
-	if specialization.Valid {
-		agent.Specialization = specialization.String
+	if specialization != nil {
+		agent.Specialization = *specialization
 	}
-	if lastActiveAt.Valid {
-		agent.LastActiveAt = lastActiveAt.String
+	if lastActiveAt != nil {
+		agent.LastActiveAt = lastActiveAt.String()
 	}
 
 	return agent, nil
@@ -122,13 +124,13 @@ func (m *AgentManager) ListAgents(ctx context.Context, limit, offset int32) ([]*
 
 	// Get total count
 	var total int32
-	err := m.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM agent_personalities").Scan(&total)
+	err := m.db.GetPool().QueryRow(ctx, "SELECT COUNT(*) FROM agent_personalities").Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to count agents: %w", err)
 	}
 
 	// Get agents
-	rows, err := m.db.QueryContext(ctx, `
+	rows, err := m.db.GetPool().Query(ctx, `
 		SELECT id, agent_name, specialization, personality_traits,
 		       current_rank, rank_progress, strikes,
 		       total_missions, successful_missions, failed_missions,
@@ -146,7 +148,8 @@ func (m *AgentManager) ListAgents(ctx context.Context, limit, offset int32) ([]*
 	agents := []*api.AgentPersonality{}
 	for rows.Next() {
 		agent := &api.AgentPersonality{}
-		var specialization, lastActiveAt sql.NullString
+		var specialization *string
+		var lastActiveAt *time.Time
 		var personalityTraits []byte
 
 		err := rows.Scan(
@@ -170,11 +173,11 @@ func (m *AgentManager) ListAgents(ctx context.Context, limit, offset int32) ([]*
 			return nil, 0, fmt.Errorf("failed to scan agent: %w", err)
 		}
 
-		if specialization.Valid {
-			agent.Specialization = specialization.String
+		if specialization != nil {
+			agent.Specialization = *specialization
 		}
-		if lastActiveAt.Valid {
-			agent.LastActiveAt = lastActiveAt.String
+		if lastActiveAt != nil {
+			agent.LastActiveAt = lastActiveAt.String()
 		}
 
 		agents = append(agents, agent)
@@ -193,7 +196,7 @@ func (m *AgentManager) UpdateAgent(ctx context.Context, req *api.UpdateAgentRequ
 
 	// Build dynamic update query
 	if req.PersonalityTraits != nil {
-		_, err = m.db.ExecContext(ctx, `
+		_, err = m.db.GetPool().Exec(ctx, `
 			UPDATE agent_personalities
 			SET personality_traits = $1, updated_at = NOW()
 			WHERE id = $2
@@ -204,7 +207,7 @@ func (m *AgentManager) UpdateAgent(ctx context.Context, req *api.UpdateAgentRequ
 	}
 
 	if req.Specialization != nil {
-		_, err = m.db.ExecContext(ctx, `
+		_, err = m.db.GetPool().Exec(ctx, `
 			UPDATE agent_personalities
 			SET specialization = $1, updated_at = NOW()
 			WHERE id = $2
@@ -226,23 +229,23 @@ func (m *AgentManager) CommendAgent(ctx context.Context, req *api.CommendAgentRe
 		req.Points = 1 // Default to 1 point
 	}
 
-	tx, err := m.db.BeginTx(ctx, nil)
+	tx, err := m.db.BeginTx(ctx)
 	if err != nil {
 		return false, 0, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer tx.Rollback(ctx)
 
 	// Get current agent state
 	var agentID, agentName string
 	var currentRank, rankProgress int
-	err = tx.QueryRowContext(ctx, `
+	err = tx.QueryRow(ctx, `
 		SELECT id, agent_name, current_rank, rank_progress
 		FROM agent_personalities
 		WHERE id = $1
 		FOR UPDATE
 	`, req.AgentID).Scan(&agentID, &agentName, &currentRank, &rankProgress)
 
-	if err == sql.ErrNoRows {
+	if err == pgx.ErrNoRows {
 		return false, 0, fmt.Errorf("agent not found: %s", req.AgentID)
 	}
 	if err != nil {
@@ -251,7 +254,7 @@ func (m *AgentManager) CommendAgent(ctx context.Context, req *api.CommendAgentRe
 
 	// Award commendation points
 	newProgress := rankProgress + req.Points
-	_, err = tx.ExecContext(ctx, `
+	_, err = tx.Exec(ctx, `
 		UPDATE agent_personalities
 		SET rank_progress = rank_progress + $1, updated_at = NOW()
 		WHERE id = $2
@@ -266,12 +269,21 @@ func (m *AgentManager) CommendAgent(ctx context.Context, req *api.CommendAgentRe
 		awardedBy = "System"
 	}
 
-	_, err = tx.ExecContext(ctx, `
+	var missionID *string
+	if req.MissionID != "" {
+		missionID = &req.MissionID
+	}
+	var relatedPR *string
+	if req.RelatedPR != "" {
+		relatedPR = &req.RelatedPR
+	}
+
+	_, err = tx.Exec(ctx, `
 		INSERT INTO agent_rank_events (
 			agent_id, event_type, rank_before, points_awarded,
 			achievement, awarded_by, mission_id, related_pr, created_at
 		) VALUES ($1, 'commendation', $2, $3, $4, $5, $6, $7, NOW())
-	`, req.AgentID, currentRank, req.Points, req.Achievement, awardedBy, sql.NullString{String: req.MissionID, Valid: req.MissionID != ""}, sql.NullString{String: req.RelatedPR, Valid: req.RelatedPR != ""})
+	`, req.AgentID, currentRank, req.Points, req.Achievement, awardedBy, missionID, relatedPR)
 
 	if err != nil {
 		return false, 0, fmt.Errorf("failed to record commendation: %w", err)
@@ -284,7 +296,7 @@ func (m *AgentManager) CommendAgent(ctx context.Context, req *api.CommendAgentRe
 		promoted = true
 		newRank = currentRank + 1
 
-		_, err = tx.ExecContext(ctx, `
+		_, err = tx.Exec(ctx, `
 			UPDATE agent_personalities
 			SET current_rank = $1, rank_progress = 0, updated_at = NOW()
 			WHERE id = $2
@@ -294,7 +306,7 @@ func (m *AgentManager) CommendAgent(ctx context.Context, req *api.CommendAgentRe
 		}
 
 		// Record promotion event
-		_, err = tx.ExecContext(ctx, `
+		_, err = tx.Exec(ctx, `
 			INSERT INTO agent_rank_events (
 				agent_id, event_type, rank_before, rank_after,
 				achievement, awarded_by, created_at
@@ -311,7 +323,7 @@ func (m *AgentManager) CommendAgent(ctx context.Context, req *api.CommendAgentRe
 			zap.Int("new_rank", newRank))
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		return false, 0, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
@@ -324,23 +336,23 @@ func (m *AgentManager) StrikeAgent(ctx context.Context, req *api.StrikeAgentRequ
 		return false, 0, fmt.Errorf("infraction required")
 	}
 
-	tx, err := m.db.BeginTx(ctx, nil)
+	tx, err := m.db.BeginTx(ctx)
 	if err != nil {
 		return false, 0, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer tx.Rollback(ctx)
 
 	// Get current agent state
 	var agentID, agentName string
 	var currentRank, strikes int
-	err = tx.QueryRowContext(ctx, `
+	err = tx.QueryRow(ctx, `
 		SELECT id, agent_name, current_rank, strikes
 		FROM agent_personalities
 		WHERE id = $1
 		FOR UPDATE
 	`, req.AgentID).Scan(&agentID, &agentName, &currentRank, &strikes)
 
-	if err == sql.ErrNoRows {
+	if err == pgx.ErrNoRows {
 		return false, 0, fmt.Errorf("agent not found: %s", req.AgentID)
 	}
 	if err != nil {
@@ -349,7 +361,7 @@ func (m *AgentManager) StrikeAgent(ctx context.Context, req *api.StrikeAgentRequ
 
 	// Increment strike count
 	newStrikes := strikes + 1
-	_, err = tx.ExecContext(ctx, `
+	_, err = tx.Exec(ctx, `
 		UPDATE agent_personalities
 		SET strikes = strikes + 1, updated_at = NOW()
 		WHERE id = $1
@@ -359,11 +371,16 @@ func (m *AgentManager) StrikeAgent(ctx context.Context, req *api.StrikeAgentRequ
 	}
 
 	// Record strike event
-	_, err = tx.ExecContext(ctx, `
+	var missionID *string
+	if req.MissionID != "" {
+		missionID = &req.MissionID
+	}
+
+	_, err = tx.Exec(ctx, `
 		INSERT INTO agent_rank_events (
 			agent_id, event_type, rank_before, infraction, awarded_by, mission_id, created_at
 		) VALUES ($1, 'strike', $2, $3, 'System', $4, NOW())
-	`, req.AgentID, currentRank, req.Infraction, sql.NullString{String: req.MissionID, Valid: req.MissionID != ""})
+	`, req.AgentID, currentRank, req.Infraction, missionID)
 
 	if err != nil {
 		return false, 0, fmt.Errorf("failed to record strike: %w", err)
@@ -376,7 +393,7 @@ func (m *AgentManager) StrikeAgent(ctx context.Context, req *api.StrikeAgentRequ
 		demoted = true
 		newRank = currentRank - 1
 
-		_, err = tx.ExecContext(ctx, `
+		_, err = tx.Exec(ctx, `
 			UPDATE agent_personalities
 			SET current_rank = $1, strikes = 0, updated_at = NOW()
 			WHERE id = $2
@@ -386,7 +403,7 @@ func (m *AgentManager) StrikeAgent(ctx context.Context, req *api.StrikeAgentRequ
 		}
 
 		// Record demotion event
-		_, err = tx.ExecContext(ctx, `
+		_, err = tx.Exec(ctx, `
 			INSERT INTO agent_rank_events (
 				agent_id, event_type, rank_before, rank_after,
 				infraction, awarded_by, created_at
@@ -404,7 +421,7 @@ func (m *AgentManager) StrikeAgent(ctx context.Context, req *api.StrikeAgentRequ
 			zap.String("infraction", req.Infraction))
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		return false, 0, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
@@ -419,13 +436,13 @@ func (m *AgentManager) ListAgentMissions(ctx context.Context, agentID string, li
 
 	// Get total count
 	var total int32
-	err := m.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM agent_missions WHERE agent_id = $1", agentID).Scan(&total)
+	err := m.db.GetPool().QueryRow(ctx, "SELECT COUNT(*) FROM agent_missions WHERE agent_id = $1", agentID).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to count missions: %w", err)
 	}
 
 	// Get missions
-	rows, err := m.db.QueryContext(ctx, `
+	rows, err := m.db.GetPool().Query(ctx, `
 		SELECT id, agent_id, mission_type, mission_name, mission_description,
 		       project_name, runner_id, session_id, status, result_summary,
 		       tokens_used, runtime_hours, started_at, completed_at, created_at
@@ -442,7 +459,7 @@ func (m *AgentManager) ListAgentMissions(ctx context.Context, agentID string, li
 	missions := []*api.AgentMission{}
 	for rows.Next() {
 		mission := &api.AgentMission{}
-		var missionDesc, projectName, runnerID, sessionID, resultSummary, completedAt sql.NullString
+		var missionDesc, projectName, runnerID, sessionID, resultSummary, completedAt *string
 
 		err := rows.Scan(
 			&mission.ID,
@@ -465,23 +482,23 @@ func (m *AgentManager) ListAgentMissions(ctx context.Context, agentID string, li
 			return nil, 0, fmt.Errorf("failed to scan mission: %w", err)
 		}
 
-		if missionDesc.Valid {
-			mission.MissionDescription = missionDesc.String
+		if missionDesc != nil {
+			mission.MissionDescription = *missionDesc
 		}
-		if projectName.Valid {
-			mission.ProjectName = projectName.String
+		if projectName != nil {
+			mission.ProjectName = *projectName
 		}
-		if runnerID.Valid {
-			mission.RunnerID = runnerID.String
+		if runnerID != nil {
+			mission.RunnerID = *runnerID
 		}
-		if sessionID.Valid {
-			mission.SessionID = sessionID.String
+		if sessionID != nil {
+			mission.SessionID = *sessionID
 		}
-		if resultSummary.Valid {
-			mission.ResultSummary = resultSummary.String
+		if resultSummary != nil {
+			mission.ResultSummary = *resultSummary
 		}
-		if completedAt.Valid {
-			mission.CompletedAt = completedAt.String
+		if completedAt != nil {
+			mission.CompletedAt = *completedAt
 		}
 
 		missions = append(missions, mission)
@@ -508,7 +525,24 @@ func (m *AgentManager) CreateMission(ctx context.Context, req *api.CreateMission
 	missionID := uuid.New().String()
 	now := time.Now()
 
-	_, err = m.db.ExecContext(ctx, `
+	var missionDescPtr *string
+	if req.MissionDescription != "" {
+		missionDescPtr = &req.MissionDescription
+	}
+	var projectNamePtr *string
+	if req.ProjectName != "" {
+		projectNamePtr = &req.ProjectName
+	}
+	var runnerIDPtr *string
+	if req.RunnerID != "" {
+		runnerIDPtr = &req.RunnerID
+	}
+	var sessionIDPtr *string
+	if req.SessionID != "" {
+		sessionIDPtr = &req.SessionID
+	}
+
+	_, err = m.db.GetPool().Exec(ctx, `
 		INSERT INTO agent_missions (
 			id, agent_id, mission_type, mission_name, mission_description,
 			project_name, runner_id, session_id, status, started_at, created_at
@@ -518,10 +552,10 @@ func (m *AgentManager) CreateMission(ctx context.Context, req *api.CreateMission
 		req.AgentID,
 		req.MissionType,
 		req.MissionName,
-		sql.NullString{String: req.MissionDescription, Valid: req.MissionDescription != ""},
-		sql.NullString{String: req.ProjectName, Valid: req.ProjectName != ""},
-		sql.NullString{String: req.RunnerID, Valid: req.RunnerID != ""},
-		sql.NullString{String: req.SessionID, Valid: req.SessionID != ""},
+		missionDescPtr,
+		projectNamePtr,
+		runnerIDPtr,
+		sessionIDPtr,
 		now,
 	)
 
@@ -530,7 +564,7 @@ func (m *AgentManager) CreateMission(ctx context.Context, req *api.CreateMission
 	}
 
 	// Increment total_missions counter
-	_, err = m.db.ExecContext(ctx, `
+	_, err = m.db.GetPool().Exec(ctx, `
 		UPDATE agent_personalities
 		SET total_missions = total_missions + 1, last_active_at = NOW(), updated_at = NOW()
 		WHERE id = $1
@@ -546,7 +580,7 @@ func (m *AgentManager) CreateMission(ctx context.Context, req *api.CreateMission
 		zap.String("mission_name", req.MissionName))
 
 	// Retrieve and return the created mission
-	row := m.db.QueryRowContext(ctx, `
+	row := m.db.GetPool().QueryRow(ctx, `
 		SELECT id, agent_id, mission_type, mission_name, mission_description,
 		       project_name, runner_id, session_id, status, result_summary,
 		       tokens_used, runtime_hours, started_at, completed_at, created_at
@@ -555,7 +589,7 @@ func (m *AgentManager) CreateMission(ctx context.Context, req *api.CreateMission
 	`, missionID)
 
 	mission := &api.AgentMission{}
-	var missionDesc, projectName, runnerID, sessionID, resultSummary, completedAt sql.NullString
+	var missionDesc, projectName, runnerID, sessionID, resultSummary, completedAt *string
 
 	err = row.Scan(
 		&mission.ID,
@@ -578,23 +612,23 @@ func (m *AgentManager) CreateMission(ctx context.Context, req *api.CreateMission
 		return nil, fmt.Errorf("failed to retrieve created mission: %w", err)
 	}
 
-	if missionDesc.Valid {
-		mission.MissionDescription = missionDesc.String
+	if missionDesc != nil {
+		mission.MissionDescription = *missionDesc
 	}
-	if projectName.Valid {
-		mission.ProjectName = projectName.String
+	if projectName != nil {
+		mission.ProjectName = *projectName
 	}
-	if runnerID.Valid {
-		mission.RunnerID = runnerID.String
+	if runnerID != nil {
+		mission.RunnerID = *runnerID
 	}
-	if sessionID.Valid {
-		mission.SessionID = sessionID.String
+	if sessionID != nil {
+		mission.SessionID = *sessionID
 	}
-	if resultSummary.Valid {
-		mission.ResultSummary = resultSummary.String
+	if resultSummary != nil {
+		mission.ResultSummary = *resultSummary
 	}
-	if completedAt.Valid {
-		mission.CompletedAt = completedAt.String
+	if completedAt != nil {
+		mission.CompletedAt = *completedAt
 	}
 
 	return mission, nil
