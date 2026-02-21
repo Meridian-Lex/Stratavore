@@ -106,7 +106,7 @@ func (m *AgentManager) GetAgent(ctx context.Context, agentID string) (*api.Agent
 
 	agent := &api.AgentPersonality{}
 	var specialization *string
-	var lastActiveAt *time.Time
+	var createdAt, lastActiveAt, updatedAt time.Time
 	var personalityTraits []byte
 
 	err = row.Scan(
@@ -122,9 +122,9 @@ func (m *AgentManager) GetAgent(ctx context.Context, agentID string) (*api.Agent
 		&agent.FailedMissions,
 		&agent.TotalTokensUsed,
 		&agent.TotalRuntimeHours,
-		&agent.CreatedAt,
+		&createdAt,
 		&lastActiveAt,
-		&agent.UpdatedAt,
+		&updatedAt,
 	)
 
 	if err == pgx.ErrNoRows {
@@ -137,8 +137,10 @@ func (m *AgentManager) GetAgent(ctx context.Context, agentID string) (*api.Agent
 	if specialization != nil {
 		agent.Specialization = *specialization
 	}
-	if lastActiveAt != nil {
-		agent.LastActiveAt = lastActiveAt.String()
+	agent.CreatedAt = api.FormatTime(createdAt)
+	agent.UpdatedAt = api.FormatTime(updatedAt)
+	if !lastActiveAt.IsZero() {
+		agent.LastActiveAt = api.FormatTime(lastActiveAt)
 	}
 
 	// Unmarshal personality traits from JSON byte array
@@ -202,7 +204,7 @@ func (m *AgentManager) ListAgents(ctx context.Context, limit, offset int32) ([]*
 	for rows.Next() {
 		agent := &api.AgentPersonality{}
 		var specialization *string
-		var lastActiveAt *time.Time
+		var createdAt, lastActiveAt, updatedAt time.Time
 		var personalityTraits []byte
 
 		err := rows.Scan(
@@ -218,9 +220,9 @@ func (m *AgentManager) ListAgents(ctx context.Context, limit, offset int32) ([]*
 			&agent.FailedMissions,
 			&agent.TotalTokensUsed,
 			&agent.TotalRuntimeHours,
-			&agent.CreatedAt,
+			&createdAt,
 			&lastActiveAt,
-			&agent.UpdatedAt,
+			&updatedAt,
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan agent: %w", err)
@@ -229,8 +231,10 @@ func (m *AgentManager) ListAgents(ctx context.Context, limit, offset int32) ([]*
 		if specialization != nil {
 			agent.Specialization = *specialization
 		}
-		if lastActiveAt != nil {
-			agent.LastActiveAt = lastActiveAt.String()
+		agent.CreatedAt = api.FormatTime(createdAt)
+		agent.UpdatedAt = api.FormatTime(updatedAt)
+		if !lastActiveAt.IsZero() {
+			agent.LastActiveAt = api.FormatTime(lastActiveAt)
 		}
 
 		// Unmarshal personality traits from JSON byte array
@@ -516,7 +520,7 @@ func (m *AgentManager) StrikeAgent(ctx context.Context, req *api.StrikeAgentRequ
 }
 
 // scanMission populates an AgentMission from row scan results
-func (m *AgentManager) scanMission(mission *api.AgentMission, missionDesc, projectName, runnerID, sessionID, resultSummary, completedAt *string) {
+func (m *AgentManager) scanMission(mission *api.AgentMission, missionDesc, projectName, runnerID, sessionID, resultSummary *string, completedAt *time.Time) {
 	if missionDesc != nil {
 		mission.MissionDescription = *missionDesc
 	}
@@ -533,7 +537,7 @@ func (m *AgentManager) scanMission(mission *api.AgentMission, missionDesc, proje
 		mission.ResultSummary = *resultSummary
 	}
 	if completedAt != nil {
-		mission.CompletedAt = *completedAt
+		mission.CompletedAt = api.FormatTime(*completedAt)
 	}
 }
 
@@ -575,7 +579,9 @@ func (m *AgentManager) ListAgentMissions(ctx context.Context, agentID string, li
 	missions := []*api.AgentMission{}
 	for rows.Next() {
 		mission := &api.AgentMission{}
-		var missionDesc, projectName, runnerID, sessionID, resultSummary, completedAt *string
+		var missionDesc, projectName, runnerID, sessionID, resultSummary *string
+		var startedAt, createdAt time.Time
+		var completedAt *time.Time
 
 		err := rows.Scan(
 			&mission.ID,
@@ -590,16 +596,22 @@ func (m *AgentManager) ListAgentMissions(ctx context.Context, agentID string, li
 			&resultSummary,
 			&mission.TokensUsed,
 			&mission.RuntimeHours,
-			&mission.StartedAt,
+			&startedAt,
 			&completedAt,
-			&mission.CreatedAt,
+			&createdAt,
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan mission: %w", err)
 		}
 
+		mission.StartedAt = api.FormatTime(startedAt)
+		mission.CreatedAt = api.FormatTime(createdAt)
 		m.scanMission(mission, missionDesc, projectName, runnerID, sessionID, resultSummary, completedAt)
 		missions = append(missions, mission)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("error iterating mission rows: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -692,7 +704,9 @@ func (m *AgentManager) CreateMission(ctx context.Context, req *api.CreateMission
 	`, missionID)
 
 	mission := &api.AgentMission{}
-	var missionDesc, projectName, runnerID, sessionID, resultSummary, completedAt *string
+	var missionDesc, projectName, runnerID, sessionID, resultSummary *string
+	var startedAt, createdAt time.Time
+	var completedAt *time.Time
 
 	err = row.Scan(
 		&mission.ID,
@@ -707,13 +721,16 @@ func (m *AgentManager) CreateMission(ctx context.Context, req *api.CreateMission
 		&resultSummary,
 		&mission.TokensUsed,
 		&mission.RuntimeHours,
-		&mission.StartedAt,
+		&startedAt,
 		&completedAt,
-		&mission.CreatedAt,
+		&createdAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve created mission: %w", err)
 	}
+
+	mission.StartedAt = api.FormatTime(startedAt)
+	mission.CreatedAt = api.FormatTime(createdAt)
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
