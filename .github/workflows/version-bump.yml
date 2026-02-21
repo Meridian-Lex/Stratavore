@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write  # Required to push back to repo
+      pull-requests: write  # Required to create PRs
 
     steps:
       - name: Checkout code
@@ -132,6 +133,10 @@ jobs:
             test -f "$b" || (echo "$b missing" && exit 1)
           done
 
+      - name: Create version bump branch
+        run: |
+          git checkout -b "version-bump/${{ steps.new_version.outputs.version }}"
+
       - name: Commit version bump
         run: |
           git add VERSION cmd/stratavored/main.go cmd/stratavore/main.go cmd/stratavore-agent/main.go cmd/stratavore-migrate/main.go
@@ -140,10 +145,27 @@ jobs:
       - name: Create git tag
         run: git tag -a "v${{ steps.new_version.outputs.version }}" -m "Release v${{ steps.new_version.outputs.version }}"
 
-      - name: Push changes and tag
+      - name: Push branch and tag
         run: |
-          git push origin main
+          git push origin "version-bump/${{ steps.new_version.outputs.version }}"
           git push origin "v${{ steps.new_version.outputs.version }}"
+
+      - name: Create pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create \
+            --base main \
+            --head "version-bump/${{ steps.new_version.outputs.version }}" \
+            --title "chore: bump version to ${{ steps.new_version.outputs.version }}" \
+            --body "Version bump triggered by merged PR #${{ github.event.pull_request.number }}
+
+Automated version bump from ${{ steps.current_version.outputs.version }} to ${{ steps.new_version.outputs.version }}.
+
+Bump type: ${{ steps.bump_type.outputs.type }}
+Original PR: #${{ github.event.pull_request.number }} (${{ github.event.pull_request.title }})" \
+            --label "chore" \
+            --label "automated"
 
       - name: Report version bump
         run: |
