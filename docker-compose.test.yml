@@ -1,0 +1,70 @@
+# Stratavore WebUI Integration Test Stack
+# Minimal compose file for testing WebUI + nginx proxy integration
+# Does NOT require full infrastructure (Postgres, RabbitMQ, etc.)
+
+version: '3.8'
+
+services:
+  # Mock daemon (simple HTTP server for API testing)
+  mock-daemon:
+    image: python:3.11-alpine
+    container_name: stratavore-mock-daemon
+    working_dir: /app
+    command: python3 /app/mock-daemon.py
+    volumes:
+      - ./deployments/mock-daemon.py:/app/mock-daemon.py:ro
+    expose:
+      - "8080"
+    networks:
+      - stratavore
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # WebUI service
+  webui:
+    build:
+      context: ./webui
+      dockerfile: Dockerfile
+    container_name: stratavore-webui-test
+    expose:
+      - "8080"
+    environment:
+      PORT: 8080
+      HOST: 0.0.0.0
+      DAEMON_API_URL: http://mock-daemon:8080
+    depends_on:
+      mock-daemon:
+        condition: service_healthy
+    networks:
+      - stratavore
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/index.html"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # nginx reverse proxy
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: stratavore-nginx-test
+    ports:
+      - "8888:80"
+    volumes:
+      - ./deployments/nginx.test.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - mock-daemon
+      - webui
+    networks:
+      - stratavore
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+networks:
+  stratavore:
+    driver: bridge
