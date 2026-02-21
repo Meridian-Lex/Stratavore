@@ -30,7 +30,15 @@ type HTTPServer struct {
 
 // NewHTTPServer creates HTTP API server.
 // It wires JWT auth and per-client rate limiting when the corresponding
-// config values are set; both default to disabled/permissive.
+// NewHTTPServer creates and configures an HTTPServer with all API routes, middleware and timeouts.
+// 
+// The server registers routes for runners, projects, sessions, metrics, heartbeat, status,
+// reconciliation, health, fleet, mode, config, tokens, state, agents (personality system),
+// sprints, tasks and model management. If a non-nil SecurityConfig is provided the middleware
+// chain will include JWT validation (when an auth secret is configured) and a per-client rate
+// limiter (with sensible defaults). The returned HTTPServer has its underlying http.Server
+// configured with the given port and 30s read/write timeouts, and carries the provided gRPC
+// handler, fleet handler and agent manager.
 func NewHTTPServer(port int, handler *GRPCServer, logger *zap.Logger, cfg *config.SecurityConfig, fleet *FleetHandler, agentManager *AgentManager) *HTTPServer {
 	mux := http.NewServeMux()
 

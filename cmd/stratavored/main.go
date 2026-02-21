@@ -32,6 +32,7 @@ func main() {
 	}
 }
 
+// It returns an error if startup fails (for example, if configuration, logger, database or message-queue initialisation fail).
 func run() error {
 	// Load configuration
 	cfg, err := config.LoadConfig()

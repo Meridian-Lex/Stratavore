@@ -319,7 +319,10 @@ func showSingleRunnerChoice(runner *types.Runner, projectName string, ctx contex
 	}
 }
 
-// showRunnerPicker shows multi-runner picker (Task 22 implementation)
+// showRunnerPicker presents a picker for multiple active runners for a project and either attaches to the selected runner or launches a new one.
+// 
+// It lists each runner with its uptime and presents an additional "Launch new runner" option. Selecting an existing runner attaches to it; selecting the launch option starts a new runner for the given project.
+// The function performs user interaction via a prompt and has no return value.
 func showRunnerPicker(runners []*types.Runner, projectName string, ctx context.Context, db *storage.PostgresClient, cfg *config.Config) {
 	fmt.Printf("\nFound %d active runners for %s:\n", len(runners), projectName)
 
@@ -352,6 +355,7 @@ func showRunnerPicker(runners []*types.Runner, projectName string, ctx context.C
 	}
 }
 
+// On success it prints the started runner's ID, status and project, and a hint to attach.
 func launchNewRunner(ctx context.Context, db *storage.PostgresClient, projectName string, cfg *config.Config) {
 	// Get project details from database
 	project, err := db.GetProject(ctx, projectName)

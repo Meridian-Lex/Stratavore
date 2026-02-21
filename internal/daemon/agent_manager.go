@@ -18,7 +18,7 @@ type AgentManager struct {
 	logger *zap.Logger
 }
 
-// NewAgentManager creates a new agent manager
+// NewAgentManager returns an AgentManager configured with the given Postgres client and logger.
 func NewAgentManager(db *storage.PostgresClient, logger *zap.Logger) *AgentManager {
 	return &AgentManager{
 		db:     db,
