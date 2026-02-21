@@ -899,6 +899,7 @@ func (s *HTTPServer) handleExecuteSprint(w http.ResponseWriter, r *http.Request)
 
 // ===== Agent Personality System Handlers =====
 
+// handleRegisterAgent handles POST /api/v1/agents/register to register a new agent personality
 func (s *HTTPServer) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -925,6 +926,7 @@ func (s *HTTPServer) handleRegisterAgent(w http.ResponseWriter, r *http.Request)
 	s.respondJSON(w, &api.RegisterAgentResponse{Agent: agent})
 }
 
+// handleListAgents handles GET /api/v1/agents/list to retrieve paginated list of agents
 func (s *HTTPServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -964,6 +966,7 @@ func (s *HTTPServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleGetAgent handles GET /api/v1/agents/get to retrieve a single agent by ID
 func (s *HTTPServer) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -990,6 +993,7 @@ func (s *HTTPServer) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, &api.GetAgentResponse{Agent: agent})
 }
 
+// handleUpdateAgent handles POST/PATCH /api/v1/agents/update to update agent personality traits or specialization
 func (s *HTTPServer) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost && r.Method != http.MethodPatch {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1016,6 +1020,7 @@ func (s *HTTPServer) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, &api.UpdateAgentResponse{Agent: agent})
 }
 
+// handleCommendAgent handles POST /api/v1/agents/commend to award commendation points and check for promotion
 func (s *HTTPServer) handleCommendAgent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1046,6 +1051,7 @@ func (s *HTTPServer) handleCommendAgent(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// handleStrikeAgent handles POST /api/v1/agents/strike to issue strikes and check for demotion
 func (s *HTTPServer) handleStrikeAgent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1076,6 +1082,7 @@ func (s *HTTPServer) handleStrikeAgent(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleListAgentMissions handles GET /api/v1/agents/missions/list to retrieve mission history for an agent
 func (s *HTTPServer) handleListAgentMissions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1105,6 +1112,7 @@ func (s *HTTPServer) handleListAgentMissions(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// handleCreateMission handles POST /api/v1/agents/missions/create to record a new mission for an agent
 func (s *HTTPServer) handleCreateMission(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
