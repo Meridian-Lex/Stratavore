@@ -198,18 +198,20 @@ jobs:
         # ISSUE #10: Permissions validation - uses GITHUB_TOKEN in GH_TOKEN env var
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION_BUMP_BODY: |
+            Version bump triggered by merged PR #${{ github.event.pull_request.number }}
+
+            Automated version bump from ${{ steps.current_version.outputs.version }} to ${{ steps.new_version.outputs.version }}.
+
+            Bump type: ${{ steps.bump_type.outputs.type }}
+            Original PR: #${{ github.event.pull_request.number }} ($PR_TITLE)
         run: |
           # ISSUE #11: Explicit error handling for PR creation
           if ! gh pr create \
             --base main \
             --head "version-bump/${{ steps.new_version.outputs.version }}" \
             --title "chore: bump version to ${{ steps.new_version.outputs.version }}" \
-            --body "Version bump triggered by merged PR #${{ github.event.pull_request.number }}
-
-Automated version bump from ${{ steps.current_version.outputs.version }} to ${{ steps.new_version.outputs.version }}.
-
-Bump type: ${{ steps.bump_type.outputs.type }}
-Original PR: #${{ github.event.pull_request.number }} ($PR_TITLE)" \
+            --body "$VERSION_BUMP_BODY" \
             --label "chore" \
             --label "automated"; then
             echo "Error: Failed to create pull request"
