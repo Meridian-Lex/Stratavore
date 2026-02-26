@@ -193,16 +193,23 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # ISSUE #11: Explicit error handling for PR creation
+          # Build PR body in file to avoid YAML syntax issues with embedded colons
+          BUMP_TYPE="${{ steps.bump_type.outputs.type }}"
+          PR_NUM="${{ github.event.pull_request.number }}"
+          OLD_VER="${{ steps.current_version.outputs.version }}"
+          NEW_VER="${{ steps.new_version.outputs.version }}"
+
+          # Create PR body file using printf to avoid YAML heredoc issues
+          printf "Version bump triggered by merged PR #%s\n\n" "$PR_NUM" > /tmp/pr_body.txt
+          printf "Automated version bump from %s to %s.\n\n" "$OLD_VER" "$NEW_VER" >> /tmp/pr_body.txt
+          printf "Bump type: %s\n" "$BUMP_TYPE" >> /tmp/pr_body.txt
+          printf "Original PR: #%s (%s)\n" "$PR_NUM" "$PR_TITLE" >> /tmp/pr_body.txt
+
           if ! gh pr create \
             --base main \
-            --head "version-bump/${{ steps.new_version.outputs.version }}" \
-            --title "chore: bump version to ${{ steps.new_version.outputs.version }}" \
-            --body "Version bump triggered by merged PR #${{ github.event.pull_request.number }}
-
-Automated version bump from ${{ steps.current_version.outputs.version }} to ${{ steps.new_version.outputs.version }}.
-
-Bump type: ${{ steps.bump_type.outputs.type }}
-Original PR: #${{ github.event.pull_request.number }} ($PR_TITLE)" \
+            --head "version-bump/$NEW_VER" \
+            --title "chore: bump version to $NEW_VER" \
+            --body-file /tmp/pr_body.txt \
             --label "chore" \
             --label "automated"; then
             echo "Error: Failed to create pull request"
@@ -217,3 +224,13 @@ Original PR: #${{ github.event.pull_request.number }} ($PR_TITLE)" \
           echo "Type:     ${{ steps.bump_type.outputs.type }}"
           echo "PR:       ${{ github.event.pull_request.number }}"
           echo "Title:    $PR_TITLE"
+
+          # Write to GitHub step summary for better visibility
+          {
+            echo "## Version Bump Summary"
+            echo "- **Previous Version:** ${{ steps.current_version.outputs.version }}"
+            echo "- **New Version:** ${{ steps.new_version.outputs.version }}"
+            echo "- **Bump Type:** ${{ steps.bump_type.outputs.type }}"
+            echo "- **Trigger PR:** #${{ github.event.pull_request.number }}"
+            echo "- **PR Title:** $PR_TITLE"
+          } >> $GITHUB_STEP_SUMMARY
