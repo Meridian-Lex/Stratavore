@@ -100,26 +100,26 @@ jobs:
 
       - name: Update version in stratavored
         run: |
-          # ISSUE #8: Robust sed patterns - handle variable whitespace
-          sed -i "s/Version[[:space:]]*=[[:space:]]*\"[^\"]*\"/Version   = \"${{ steps.new_version.outputs.version }}\"/" cmd/stratavored/main.go
+          # ISSUE #8: Robust sed patterns - handle variable whitespace, preserve original formatting
+          sed -i -E "s/(Version[[:space:]]*=[[:space:]]*)\"[^\"]*\"/\1\"${{ steps.new_version.outputs.version }}\"/" cmd/stratavored/main.go
           echo "Updated cmd/stratavored/main.go"
 
       - name: Update version in stratavore CLI
         run: |
-          # ISSUE #8: Robust sed patterns - handle variable whitespace
-          sed -i "s/Version[[:space:]]*=[[:space:]]*\"[^\"]*\"/Version   = \"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore/main.go
+          # ISSUE #8: Robust sed patterns - handle variable whitespace, preserve original formatting
+          sed -i -E "s/(Version[[:space:]]*=[[:space:]]*)\"[^\"]*\"/\1\"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore/main.go
           echo "Updated cmd/stratavore/main.go"
 
       - name: Update version in stratavore-agent
         run: |
-          # ISSUE #8: Robust sed patterns - handle variable whitespace
-          sed -i "s/Version[[:space:]]*=[[:space:]]*\"[^\"]*\"/Version     = \"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore-agent/main.go
+          # ISSUE #8: Robust sed patterns - handle variable whitespace, preserve original formatting
+          sed -i -E "s/(Version[[:space:]]*=[[:space:]]*)\"[^\"]*\"/\1\"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore-agent/main.go
           echo "Updated cmd/stratavore-agent/main.go"
 
       - name: Update version in stratavore-migrate
         run: |
-          # ISSUE #8: Robust sed patterns - handle variable whitespace
-          sed -i "s/Version[[:space:]]*=[[:space:]]*\"[^\"]*\"/Version   = \"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore-migrate/main.go
+          # ISSUE #8: Robust sed patterns - handle variable whitespace, preserve original formatting
+          sed -i -E "s/(Version[[:space:]]*=[[:space:]]*)\"[^\"]*\"/\1\"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore-migrate/main.go
           echo "Updated cmd/stratavore-migrate/main.go"
 
       - name: Verify version updates
@@ -128,16 +128,16 @@ jobs:
           cat VERSION
           echo ""
           echo "=== stratavored version ==="
-          grep 'Version   =' cmd/stratavored/main.go
+          grep -E 'Version[[:space:]]*=' cmd/stratavored/main.go
           echo ""
           echo "=== stratavore version ==="
-          grep 'Version   =' cmd/stratavore/main.go
+          grep -E 'Version[[:space:]]*=' cmd/stratavore/main.go
           echo ""
           echo "=== stratavore-agent version ==="
-          grep 'Version     =' cmd/stratavore-agent/main.go
+          grep -E 'Version[[:space:]]*=' cmd/stratavore-agent/main.go
           echo ""
           echo "=== stratavore-migrate version ==="
-          grep 'Version   =' cmd/stratavore-migrate/main.go
+          grep -E 'Version[[:space:]]*=' cmd/stratavore-migrate/main.go
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -158,8 +158,14 @@ jobs:
         run: |
           # ISSUE #9: Use consistent version-bump/ prefix pattern
           # Make idempotent - checkout existing branch or create new one
-          git checkout "version-bump/${{ steps.new_version.outputs.version }}" 2>/dev/null || \
-            git checkout -b "version-bump/${{ steps.new_version.outputs.version }}"
+          BRANCH_NAME="version-bump/${{ steps.new_version.outputs.version }}"
+          if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
+            git checkout "$BRANCH_NAME"
+          elif git show-ref --verify --quiet "refs/remotes/origin/$BRANCH_NAME"; then
+            git checkout --track "origin/$BRANCH_NAME"
+          else
+            git checkout -b "$BRANCH_NAME"
+          fi
 
       - name: Commit version bump
         run: |
