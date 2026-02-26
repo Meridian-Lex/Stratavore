@@ -1,0 +1,63 @@
+name: Tag Release
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  create-tag:
+    # Only run when a version-bump PR is merged to main
+    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main' && startsWith(github.event.pull_request.head.ref, 'version-bump/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Get version from VERSION file
+        id: get_version
+        run: |
+          VERSION=$(cat VERSION)
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Version from VERSION file: ${VERSION}"
+
+      - name: Create and push git tag
+        run: |
+          TAG_NAME="v${{ steps.get_version.outputs.version }}"
+
+          # Check if tag already exists
+          if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Tag $TAG_NAME already exists, skipping"
+            exit 0
+          fi
+
+          # Create annotated tag
+          if ! git tag -a "$TAG_NAME" -m "Release $TAG_NAME"; then
+            echo "Error: Failed to create tag $TAG_NAME"
+            exit 1
+          fi
+
+          # Push tag
+          if ! git push origin "$TAG_NAME"; then
+            echo "Error: Failed to push tag $TAG_NAME"
+            exit 1
+          fi
+
+          echo "Successfully created and pushed tag $TAG_NAME"
+
+      - name: Report tag creation
+        run: |
+          echo "Tag Creation Summary"
+          echo "Version: ${{ steps.get_version.outputs.version }}"
+          echo "Tag:     v${{ steps.get_version.outputs.version }}"
+          echo "PR:      #${{ github.event.pull_request.number }}"

@@ -62,7 +62,8 @@ jobs:
 
       - name: Output bump type
         # ISSUE #4: Move echo statement to separate step after bump_type completes
-        run: echo "Bump type: ${{ steps.bump_type.outputs.type }}"
+        run: |
+          echo "Bump type: ${{ steps.bump_type.outputs.type }}"
 
       - name: Bump version
         id: new_version
@@ -138,12 +139,14 @@ jobs:
           echo "=== stratavore-migrate version ==="
           grep 'Version   =' cmd/stratavore-migrate/main.go
 
-      - name: Build binaries
+      - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-      - run: make build
+
+      - name: Build binaries
+        run: make build
 
       - name: Verify bin artifacts
         run: |
@@ -154,7 +157,9 @@ jobs:
       - name: Create version bump branch
         run: |
           # ISSUE #9: Use consistent version-bump/ prefix pattern
-          git checkout -b "version-bump/${{ steps.new_version.outputs.version }}"
+          # Make idempotent - checkout existing branch or create new one
+          git checkout "version-bump/${{ steps.new_version.outputs.version }}" 2>/dev/null || \
+            git checkout -b "version-bump/${{ steps.new_version.outputs.version }}"
 
       - name: Commit version bump
         run: |
@@ -174,23 +179,13 @@ jobs:
             exit 1
           fi
 
-      - name: Create git tag on version-bump branch
-        # ISSUE #6: Tag created on version-bump branch; merge to main will happen via PR approval
-        # After PR approval and merge to main, tag will be pushed from main
-        # ISSUE #11: Explicit error handling for tag creation
+      - name: Ensure labels exist
+        # Create labels if they don't exist (idempotent)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if ! git tag -a "v${{ steps.new_version.outputs.version }}" -m "Release v${{ steps.new_version.outputs.version }}"; then
-            echo "Error: Failed to create tag"
-            exit 1
-          fi
-
-      - name: Push tag
-        # ISSUE #11: Explicit error handling for git operations
-        run: |
-          if ! git push origin "v${{ steps.new_version.outputs.version }}"; then
-            echo "Error: Failed to push tag"
-            exit 1
-          fi
+          gh label create "chore" --description "Chore: maintenance tasks" --color "d4c5f9" --force || true
+          gh label create "automated" --description "Automated PR" --color "0e8a16" --force || true
 
       - name: Create pull request
         # ISSUE #10: Permissions validation - uses GITHUB_TOKEN in GH_TOKEN env var
