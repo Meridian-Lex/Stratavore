@@ -55,18 +55,24 @@ After configuring branch protection:
 ## Troubleshooting
 
 ### Auto-merge not enabled on PR
+
 **Symptom**: PR created but no auto-merge badge
+
 **Fix**: Check that `gh pr merge --auto` command succeeded. Review workflow logs.
 
 ### PR not auto-merging after checks pass
+
 **Symptom**: Checks green but PR stays open
+
 **Fix**:
 - Verify branch protection requires the right checks
 - Ensure github-actions[bot] can bypass approval if required
 - Check if PR is marked as draft (auto-merge disabled for drafts)
 
 ### Permission denied when enabling auto-merge
+
 **Symptom**: Workflow fails at "Enable auto-merge" step
+
 **Fix**: Ensure GITHUB_TOKEN has `contents: write` and `pull-requests: write` permissions
 
 ---
