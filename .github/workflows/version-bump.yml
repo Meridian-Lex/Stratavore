@@ -155,17 +155,27 @@ jobs:
           done
 
       - name: Create version bump branch
+        id: create_branch
         run: |
           # ISSUE #9: Use consistent version-bump/ prefix pattern
-          # Make idempotent - checkout existing branch or create new one
+          # Make idempotent - delete existing branch and recreate to avoid checkout conflicts
           BRANCH_NAME="version-bump/${{ steps.new_version.outputs.version }}"
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+
+          # Delete local branch if it exists (with uncommitted changes, checkout fails)
           if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
-            git checkout "$BRANCH_NAME"
-          elif git show-ref --verify --quiet "refs/remotes/origin/$BRANCH_NAME"; then
-            git checkout --track "origin/$BRANCH_NAME"
-          else
-            git checkout -b "$BRANCH_NAME"
+            git branch -D "$BRANCH_NAME"
           fi
+
+          # Delete remote branch if it exists (force-push will update it anyway)
+          # Use git ls-remote to query remote directly (more reliable than stale tracking refs)
+          # Use grep -qF for fixed-string match (branch name contains dots)
+          if git ls-remote --heads origin "$BRANCH_NAME" | grep -qF "$BRANCH_NAME"; then
+            git push origin --delete "$BRANCH_NAME" || true
+          fi
+
+          # Create fresh branch
+          git checkout -b "$BRANCH_NAME"
 
       - name: Commit version bump
         run: |
@@ -179,8 +189,10 @@ jobs:
 
       - name: Push version-bump branch
         # ISSUE #11: Explicit error handling for git operations
+        # Use force-push since we delete and recreate the branch for idempotency
+        # Reuse BRANCH_NAME from create_branch step to avoid drift
         run: |
-          if ! git push origin "version-bump/${{ steps.new_version.outputs.version }}"; then
+          if ! git push --force-with-lease origin "${{ steps.create_branch.outputs.branch_name }}"; then
             echo "Error: Failed to push version-bump branch"
             exit 1
           fi
@@ -243,6 +255,27 @@ jobs:
             exit 1
           fi
           echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
+
+      - name: Auto-approve PR
+        # Use LexCode OAuth token to approve version-bump PR
+        # LexCode is Meridian-Lex's OAuth app with repo approval permissions
+        # Token must be stored as repository secret: LEXCODE_TOKEN
+        env:
+          GH_TOKEN: ${{ secrets.LEXCODE_TOKEN }}
+        run: |
+          # Approve the PR using LexCode token (if configured)
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::LEXCODE_TOKEN not configured - skipping auto-approval"
+            echo "PR created but requires manual approval before auto-merge can proceed."
+          elif ! gh pr review "${{ steps.create_pr.outputs.PR_NUMBER }}" \
+            --repo "${{ github.repository }}" \
+            --approve \
+            --body "Automated approval by LexCode for version bump to ${{ steps.new_version.outputs.version }}"; then
+            echo "::warning::Failed to auto-approve PR #${{ steps.create_pr.outputs.PR_NUMBER }}"
+            echo "PR created but requires manual approval before auto-merge can proceed."
+          else
+            echo "PR #${{ steps.create_pr.outputs.PR_NUMBER }} auto-approved by LexCode"
+          fi
 
       - name: Enable auto-merge
         # ISSUE #12: Enable GitHub auto-merge for automated version bump PRs
