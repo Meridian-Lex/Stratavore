@@ -157,15 +157,21 @@ jobs:
       - name: Create version bump branch
         run: |
           # ISSUE #9: Use consistent version-bump/ prefix pattern
-          # Make idempotent - checkout existing branch or create new one
+          # Make idempotent - delete existing branch and recreate to avoid checkout conflicts
           BRANCH_NAME="version-bump/${{ steps.new_version.outputs.version }}"
+
+          # Delete local branch if it exists (with uncommitted changes, checkout fails)
           if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
-            git checkout "$BRANCH_NAME"
-          elif git show-ref --verify --quiet "refs/remotes/origin/$BRANCH_NAME"; then
-            git checkout --track "origin/$BRANCH_NAME"
-          else
-            git checkout -b "$BRANCH_NAME"
+            git branch -D "$BRANCH_NAME"
           fi
+
+          # Delete remote branch if it exists (force-push will update it anyway)
+          if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH_NAME"; then
+            git push origin --delete "$BRANCH_NAME" || true
+          fi
+
+          # Create fresh branch
+          git checkout -b "$BRANCH_NAME"
 
       - name: Commit version bump
         run: |
@@ -179,8 +185,9 @@ jobs:
 
       - name: Push version-bump branch
         # ISSUE #11: Explicit error handling for git operations
+        # Use force-push since we delete and recreate the branch for idempotency
         run: |
-          if ! git push origin "version-bump/${{ steps.new_version.outputs.version }}"; then
+          if ! git push --force-with-lease origin "version-bump/${{ steps.new_version.outputs.version }}"; then
             echo "Error: Failed to push version-bump branch"
             exit 1
           fi
