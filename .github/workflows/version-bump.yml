@@ -195,6 +195,7 @@ jobs:
 
       - name: Create pull request
         # ISSUE #10: Permissions validation - uses GITHUB_TOKEN in GH_TOKEN env var
+        id: create_pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -235,12 +236,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Enable auto-merge (requires branch protection and passing checks)
-          gh pr merge "version-bump/${{ steps.new_version.outputs.version }}" \
+          # Enable auto-merge using captured PR number (requires branch protection and passing checks)
+          gh pr merge "${{ steps.create_pr.outputs.PR_NUMBER }}" \
             --auto \
             --merge \
             --delete-branch
-          echo "Auto-merge enabled for PR"
+          echo "Auto-merge enabled for PR #${{ steps.create_pr.outputs.PR_NUMBER }}"
 
       - name: Report version bump
         run: |
