@@ -45,8 +45,8 @@ jobs:
           COMMIT_MSG="$PR_TITLE"
           PR_BODY_TEXT="$PR_BODY"
 
-          if echo "$COMMIT_MSG" | grep -qiE "^BREAKING CHANGE:|breaking change:" || \
-             echo "$PR_BODY_TEXT" | grep -qiE "^BREAKING CHANGE:|breaking change:"; then
+          if echo "$COMMIT_MSG" | grep -qiE "^BREAKING CHANGE:|^breaking change:" || \
+             echo "$PR_BODY_TEXT" | grep -qiE "^BREAKING CHANGE:|^breaking change:"; then
             BUMP_TYPE="major"
           elif echo "$COMMIT_MSG" | grep -qiE "^feat(\(.+\))?:|^feature:"; then
             BUMP_TYPE="minor"
