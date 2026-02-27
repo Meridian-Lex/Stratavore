@@ -195,6 +195,7 @@ jobs:
 
       - name: Create pull request
         # ISSUE #10: Permissions validation - uses GITHUB_TOKEN in GH_TOKEN env var
+        id: create_pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -211,15 +212,54 @@ jobs:
           printf "Bump type: %s\n" "$BUMP_TYPE" >> /tmp/pr_body.txt
           printf "Original PR: #%s (%s)\n" "$PR_NUM" "$PR_TITLE" >> /tmp/pr_body.txt
 
-          if ! gh pr create \
-            --base main \
-            --head "version-bump/$NEW_VER" \
-            --title "chore: bump version to $NEW_VER" \
-            --body-file /tmp/pr_body.txt \
-            --label "chore" \
-            --label "automated"; then
-            echo "Error: Failed to create pull request"
+          # Check for existing PR on this branch (idempotency)
+          EXISTING_PR=$(gh pr list --head "version-bump/$NEW_VER" --json url --jq '.[0].url' || echo "")
+
+          if [ -n "$EXISTING_PR" ]; then
+            echo "Found existing PR: $EXISTING_PR"
+            PR_URL="$EXISTING_PR"
+          else
+            echo "Creating new PR..."
+            PR_URL=$(gh pr create \
+              --base main \
+              --head "version-bump/$NEW_VER" \
+              --title "chore: bump version to $NEW_VER" \
+              --body-file /tmp/pr_body.txt \
+              --label "chore" \
+              --label "automated")
+          fi
+
+          if [ -z "$PR_URL" ]; then
+            echo "Error: Failed to create or find pull request"
             exit 1
+          fi
+
+          echo "Created PR: $PR_URL"
+
+          # Extract PR number from URL
+          PR_NUMBER=$(echo "$PR_URL" | grep -oP '\d+$')
+          if [ -z "$PR_NUMBER" ]; then
+            echo "::error::Failed to extract PR number from URL: $PR_URL"
+            exit 1
+          fi
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
+
+      - name: Enable auto-merge
+        # ISSUE #12: Enable GitHub auto-merge for automated version bump PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Enable auto-merge using captured PR number (requires branch protection and passing checks)
+          if ! gh pr merge "${{ steps.create_pr.outputs.PR_NUMBER }}" \
+            --auto \
+            --merge \
+            --delete-branch; then
+            echo "::warning::Failed to enable auto-merge for PR #${{ steps.create_pr.outputs.PR_NUMBER }}"
+            echo "This may indicate auto-merge is not enabled in repository settings or branch protection is misconfigured."
+            echo "See .github/AUTO-MERGE-SETUP.md for configuration requirements."
+            # Don't fail the workflow - PR was still created successfully
+          else
+            echo "Auto-merge enabled for PR #${{ steps.create_pr.outputs.PR_NUMBER }}"
           fi
 
       - name: Report version bump
