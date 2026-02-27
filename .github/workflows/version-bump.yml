@@ -211,16 +211,36 @@ jobs:
           printf "Bump type: %s\n" "$BUMP_TYPE" >> /tmp/pr_body.txt
           printf "Original PR: #%s (%s)\n" "$PR_NUM" "$PR_TITLE" >> /tmp/pr_body.txt
 
-          if ! gh pr create \
+          PR_URL=$(gh pr create \
             --base main \
             --head "version-bump/$NEW_VER" \
             --title "chore: bump version to $NEW_VER" \
             --body-file /tmp/pr_body.txt \
             --label "chore" \
-            --label "automated"; then
+            --label "automated")
+
+          if [ -z "$PR_URL" ]; then
             echo "Error: Failed to create pull request"
             exit 1
           fi
+
+          echo "Created PR: $PR_URL"
+
+          # Extract PR number from URL
+          PR_NUMBER=$(echo "$PR_URL" | grep -oP '\d+$')
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
+
+      - name: Enable auto-merge
+        # ISSUE #12: Enable GitHub auto-merge for automated version bump PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Enable auto-merge (requires branch protection and passing checks)
+          gh pr merge "version-bump/${{ steps.new_version.outputs.version }}" \
+            --auto \
+            --merge \
+            --delete-branch
+          echo "Auto-merge enabled for PR"
 
       - name: Report version bump
         run: |
