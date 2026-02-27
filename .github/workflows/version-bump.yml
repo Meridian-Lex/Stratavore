@@ -169,7 +169,8 @@ jobs:
 
           # Delete remote branch if it exists (force-push will update it anyway)
           # Use git ls-remote to query remote directly (more reliable than stale tracking refs)
-          if git ls-remote --heads origin "$BRANCH_NAME" | grep -q "$BRANCH_NAME"; then
+          # Use grep -qF for fixed-string match (branch name contains dots)
+          if git ls-remote --heads origin "$BRANCH_NAME" | grep -qF "$BRANCH_NAME"; then
             git push origin --delete "$BRANCH_NAME" || true
           fi
 
@@ -267,7 +268,7 @@ jobs:
             echo "::warning::LEXCODE_TOKEN not configured - skipping auto-approval"
             echo "PR created but requires manual approval before auto-merge can proceed."
           elif ! gh pr review "${{ steps.create_pr.outputs.PR_NUMBER }}" \
-            --repo ${{ github.repository }} \
+            --repo "${{ github.repository }}" \
             --approve \
             --body "Automated approval by LexCode for version bump to ${{ steps.new_version.outputs.version }}"; then
             echo "::warning::Failed to auto-approve PR #${{ steps.create_pr.outputs.PR_NUMBER }}"
