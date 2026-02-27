@@ -212,16 +212,25 @@ jobs:
           printf "Bump type: %s\n" "$BUMP_TYPE" >> /tmp/pr_body.txt
           printf "Original PR: #%s (%s)\n" "$PR_NUM" "$PR_TITLE" >> /tmp/pr_body.txt
 
-          PR_URL=$(gh pr create \
-            --base main \
-            --head "version-bump/$NEW_VER" \
-            --title "chore: bump version to $NEW_VER" \
-            --body-file /tmp/pr_body.txt \
-            --label "chore" \
-            --label "automated")
+          # Check for existing PR on this branch (idempotency)
+          EXISTING_PR=$(gh pr list --head "version-bump/$NEW_VER" --json url --jq '.[0].url' || echo "")
+
+          if [ -n "$EXISTING_PR" ]; then
+            echo "Found existing PR: $EXISTING_PR"
+            PR_URL="$EXISTING_PR"
+          else
+            echo "Creating new PR..."
+            PR_URL=$(gh pr create \
+              --base main \
+              --head "version-bump/$NEW_VER" \
+              --title "chore: bump version to $NEW_VER" \
+              --body-file /tmp/pr_body.txt \
+              --label "chore" \
+              --label "automated")
+          fi
 
           if [ -z "$PR_URL" ]; then
-            echo "Error: Failed to create pull request"
+            echo "Error: Failed to create or find pull request"
             exit 1
           fi
 
