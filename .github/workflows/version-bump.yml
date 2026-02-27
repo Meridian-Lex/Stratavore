@@ -229,6 +229,10 @@ jobs:
 
           # Extract PR number from URL
           PR_NUMBER=$(echo "$PR_URL" | grep -oP '\d+$')
+          if [ -z "$PR_NUMBER" ]; then
+            echo "::error::Failed to extract PR number from URL: $PR_URL"
+            exit 1
+          fi
           echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
 
       - name: Enable auto-merge
@@ -237,11 +241,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Enable auto-merge using captured PR number (requires branch protection and passing checks)
-          gh pr merge "${{ steps.create_pr.outputs.PR_NUMBER }}" \
+          if ! gh pr merge "${{ steps.create_pr.outputs.PR_NUMBER }}" \
             --auto \
             --merge \
-            --delete-branch
-          echo "Auto-merge enabled for PR #${{ steps.create_pr.outputs.PR_NUMBER }}"
+            --delete-branch; then
+            echo "::warning::Failed to enable auto-merge for PR #${{ steps.create_pr.outputs.PR_NUMBER }}"
+            echo "This may indicate auto-merge is not enabled in repository settings or branch protection is misconfigured."
+            echo "See .github/AUTO-MERGE-SETUP.md for configuration requirements."
+            # Don't fail the workflow - PR was still created successfully
+          else
+            echo "Auto-merge enabled for PR #${{ steps.create_pr.outputs.PR_NUMBER }}"
+          fi
 
       - name: Report version bump
         run: |

@@ -27,7 +27,7 @@ For auto-merge to work, configure the following on the `main` branch:
 - ✓ **Require a pull request before merging**
   - ✓ Require approvals: 0 (or use bypass below)
 - ✓ **Require status checks to pass before merging**
-  - ✓ Require branches to be up to date before merging
+  - ✓ Require branches to be up-to-date before merging
   - Add required checks: `build-and-test` (or whatever your CI workflow is named)
 - ✓ **Allow specified actors to bypass required pull requests**
   - Add: `github-actions[bot]` or the GitHub Actions app
