@@ -67,25 +67,26 @@ func (c *KnowledgeCache) Set(ctx context.Context, query string, k int, chunks []
 // InvalidateFile clears all query cache entries when a source file changes.
 // Any cached result could contain chunks from the modified file, so we flush
 // the entire query cache rather than tracking per-file cache membership.
+// Keys are deleted in batches as they are scanned to bound memory usage.
 func (c *KnowledgeCache) InvalidateFile(ctx context.Context) error {
 	var cursor uint64
 	pattern := CacheKeyPrefix + "*"
-	var keysToDelete []string
 	for {
 		keys, next, err := c.client.Scan(ctx, cursor, pattern, 100).Result()
 		if err != nil {
 			return fmt.Errorf("scan cache keys: %w", err)
 		}
-		keysToDelete = append(keysToDelete, keys...)
+		if len(keys) > 0 {
+			if err := c.client.Del(ctx, keys...).Err(); err != nil {
+				return fmt.Errorf("delete cache keys: %w", err)
+			}
+		}
 		cursor = next
 		if cursor == 0 {
 			break
 		}
 	}
-	if len(keysToDelete) == 0 {
-		return nil
-	}
-	return c.client.Del(ctx, keysToDelete...).Err()
+	return nil
 }
 
 // Ping checks Redis connectivity.

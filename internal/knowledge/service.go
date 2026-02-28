@@ -197,15 +197,17 @@ func (s *Service) IndexFile(ctx context.Context, path string) error {
 		s.logger.Warn("failed to delete stale qdrant points",
 			zap.String("file", filename), zap.Error(err))
 	}
-	// Invalidate cache entries for this file
-	if err := s.cache.InvalidateFile(ctx); err != nil {
-		s.logger.Warn("failed to invalidate query cache after re-index",
-			zap.String("file", filename), zap.Error(err))
-	}
 
 	// Upsert new points
 	if err := s.qdrant.UpsertPoints(ctx, chunks, vectors); err != nil {
 		return fmt.Errorf("upsert %s: %w", filename, err)
+	}
+
+	// Invalidate cache after successful upsert — invalidating before would allow
+	// concurrent queries to cache empty/partial results during the indexing gap.
+	if err := s.cache.InvalidateFile(ctx); err != nil {
+		s.logger.Warn("failed to invalidate query cache after re-index",
+			zap.String("file", filename), zap.Error(err))
 	}
 
 	s.logger.Info("indexed knowledge file",
