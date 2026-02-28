@@ -1458,6 +1458,7 @@ func (c *PostgresClient) GetAgentByID(ctx context.Context, agentID string) (*api
 	var specialization *string
 	var lastActiveAt *time.Time
 	var personalityTraits []byte
+	var createdAt, updatedAt time.Time
 
 	err = row.Scan(
 		&agent.ID,
@@ -1472,9 +1473,9 @@ func (c *PostgresClient) GetAgentByID(ctx context.Context, agentID string) (*api
 		&agent.FailedMissions,
 		&agent.TotalTokensUsed,
 		&agent.TotalRuntimeHours,
-		&agent.CreatedAt,
+		&createdAt,
 		&lastActiveAt,
-		&agent.UpdatedAt,
+		&updatedAt,
 	)
 
 	if err == pgx.ErrNoRows {
@@ -1488,8 +1489,10 @@ func (c *PostgresClient) GetAgentByID(ctx context.Context, agentID string) (*api
 		agent.Specialization = *specialization
 	}
 	if lastActiveAt != nil {
-		agent.LastActiveAt = lastActiveAt.String()
+		agent.LastActiveAt = api.FormatTime(*lastActiveAt)
 	}
+	agent.CreatedAt = api.FormatTime(createdAt)
+	agent.UpdatedAt = api.FormatTime(updatedAt)
 
 	// Unmarshal personality traits from JSON byte array
 	if len(personalityTraits) > 0 {
@@ -1550,6 +1553,7 @@ func (c *PostgresClient) ListAgents(ctx context.Context, limit, offset int32) ([
 		var specialization *string
 		var lastActiveAt *time.Time
 		var personalityTraits []byte
+		var createdAt, updatedAt time.Time
 
 		err := rows.Scan(
 			&agent.ID,
@@ -1564,9 +1568,9 @@ func (c *PostgresClient) ListAgents(ctx context.Context, limit, offset int32) ([
 			&agent.FailedMissions,
 			&agent.TotalTokensUsed,
 			&agent.TotalRuntimeHours,
-			&agent.CreatedAt,
+			&createdAt,
 			&lastActiveAt,
-			&agent.UpdatedAt,
+			&updatedAt,
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan agent: %w", err)
@@ -1576,8 +1580,10 @@ func (c *PostgresClient) ListAgents(ctx context.Context, limit, offset int32) ([
 			agent.Specialization = *specialization
 		}
 		if lastActiveAt != nil {
-			agent.LastActiveAt = lastActiveAt.String()
+			agent.LastActiveAt = api.FormatTime(*lastActiveAt)
 		}
+		agent.CreatedAt = api.FormatTime(createdAt)
+		agent.UpdatedAt = api.FormatTime(updatedAt)
 
 		// Unmarshal personality traits from JSON byte array
 		if len(personalityTraits) > 0 {

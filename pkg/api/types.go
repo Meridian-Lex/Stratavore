@@ -400,8 +400,8 @@ type AgentRankEvent struct {
 // Agent API Requests
 
 type RegisterAgentRequest struct {
-	AgentName         string                 `json:"agent_name"`
-	PersonalityTraits map[string]interface{} `json:"personality_traits,omitempty"`
+	AgentName         string                 `json:"agentName"`
+	PersonalityTraits map[string]interface{} `json:"personalityTraits,omitempty"`
 }
 
 type RegisterAgentResponse struct {
@@ -421,7 +421,7 @@ type ListAgentsResponse struct {
 }
 
 type GetAgentRequest struct {
-	AgentID string `json:"agent_id"`
+	AgentID string `json:"agentId"`
 }
 
 type GetAgentResponse struct {
@@ -430,8 +430,8 @@ type GetAgentResponse struct {
 }
 
 type UpdateAgentRequest struct {
-	AgentID           string                 `json:"agent_id"`
-	PersonalityTraits map[string]interface{} `json:"personality_traits,omitempty"`
+	AgentID           string                 `json:"agentId"`
+	PersonalityTraits map[string]interface{} `json:"personalityTraits,omitempty"`
 	Specialization    *string                `json:"specialization,omitempty"`
 }
 
@@ -441,36 +441,36 @@ type UpdateAgentResponse struct {
 }
 
 type CommendAgentRequest struct {
-	AgentID     string `json:"agent_id"`
+	AgentID     string `json:"agentId"`
 	Achievement string `json:"achievement"`
 	Points      int    `json:"points"`
-	AwardedBy   string `json:"awarded_by,omitempty"`
-	MissionID   string `json:"mission_id,omitempty"`
-	RelatedPR   string `json:"related_pr,omitempty"`
+	AwardedBy   string `json:"awardedBy,omitempty"`
+	MissionID   string `json:"missionId,omitempty"`
+	RelatedPR   string `json:"relatedPr,omitempty"`
 }
 
 type CommendAgentResponse struct {
 	Success  bool   `json:"success"`
 	Promoted bool   `json:"promoted,omitempty"`
-	NewRank  int    `json:"new_rank,omitempty"`
+	NewRank  int    `json:"newRank,omitempty"`
 	Error    string `json:"error,omitempty"`
 }
 
 type StrikeAgentRequest struct {
-	AgentID    string `json:"agent_id"`
+	AgentID    string `json:"agentId"`
 	Infraction string `json:"infraction"`
-	MissionID  string `json:"mission_id,omitempty"`
+	MissionID  string `json:"missionId,omitempty"`
 }
 
 type StrikeAgentResponse struct {
 	Success bool   `json:"success"`
 	Demoted bool   `json:"demoted,omitempty"`
-	NewRank int    `json:"new_rank,omitempty"`
+	NewRank int    `json:"newRank,omitempty"`
 	Error   string `json:"error,omitempty"`
 }
 
 type ListAgentMissionsRequest struct {
-	AgentID string `json:"agent_id"`
+	AgentID string `json:"agentId"`
 	Limit   int32  `json:"limit,omitempty"`
 	Offset  int32  `json:"offset,omitempty"`
 }
@@ -482,13 +482,13 @@ type ListAgentMissionsResponse struct {
 }
 
 type CreateMissionRequest struct {
-	AgentID            string `json:"agent_id"`
-	MissionType        string `json:"mission_type"`
-	MissionName        string `json:"mission_name"`
-	MissionDescription string `json:"mission_description,omitempty"`
-	ProjectName        string `json:"project_name,omitempty"`
-	RunnerID           string `json:"runner_id,omitempty"`
-	SessionID          string `json:"session_id,omitempty"`
+	AgentID            string `json:"agentId"`
+	MissionType        string `json:"missionType"`
+	MissionName        string `json:"missionName"`
+	MissionDescription string `json:"missionDescription,omitempty"`
+	ProjectName        string `json:"projectName,omitempty"`
+	RunnerID           string `json:"runnerId,omitempty"`
+	SessionID          string `json:"sessionId,omitempty"`
 }
 
 type CreateMissionResponse struct {

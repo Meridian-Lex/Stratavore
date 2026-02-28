@@ -18,7 +18,7 @@ CREATE TABLE agent_personalities (
     -- Constraints
     CHECK (current_rank >= 0 AND current_rank <= 10),
     CHECK (rank_progress >= 0 AND rank_progress < 5),
-    CHECK (strikes >= 0 AND strikes < 3),
+    CHECK (strikes >= 0 AND strikes <= 3),
 
     -- Service record
     total_missions INTEGER DEFAULT 0,
