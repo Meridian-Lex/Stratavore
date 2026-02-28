@@ -120,10 +120,10 @@ services:
       context: .
       dockerfile: Dockerfile.daemon
     container_name: stratavore-daemon
-    ports:
-      - "8080:8080"   # HTTP API
-      - "50051:50051" # gRPC API
-      - "9091:9091"   # Prometheus metrics
+    expose:
+      - "8080"   # HTTP API (internal only, proxied via nginx)
+      - "50051"  # gRPC API (internal only)
+      - "9091"   # Prometheus metrics (internal only)
     environment:
       STRATAVORE_DATABASE_POSTGRESQL_HOST: postgres
       STRATAVORE_DATABASE_POSTGRESQL_PORT: 5432
@@ -157,6 +157,51 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Stratavore WebUI
+  webui:
+    build:
+      context: ./webui
+      dockerfile: Dockerfile
+    container_name: stratavore-webui
+    expose:
+      - "8080"   # WebUI server (internal only, proxied via nginx)
+    environment:
+      PORT: 8080
+      HOST: 0.0.0.0
+      DAEMON_API_URL: http://stratavore-daemon:8080
+    depends_on:
+      stratavored:
+        condition: service_healthy
+    networks:
+      - stratavore
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/index.html"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  # nginx Reverse Proxy (unified ingress)
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: stratavore-nginx
+    ports:
+      - "8080:80"     # Unified HTTP ingress
+    volumes:
+      - ./deployments/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - stratavored
+      - webui
+    networks:
+      - stratavore
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80/health"]
       interval: 30s
       timeout: 10s
       retries: 3

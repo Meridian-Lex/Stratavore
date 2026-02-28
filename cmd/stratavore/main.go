@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/manifoldco/promptui"
 	"github.com/meridian-lex/stratavore/internal/session"
 	"github.com/meridian-lex/stratavore/internal/storage"
 	"github.com/meridian-lex/stratavore/internal/ui"
@@ -38,7 +37,7 @@ func getAPIClient() *client.Client {
 }
 
 var (
-	Version   = "1.4.0"
+	Version   = "1.4.1"
 	BuildTime = "unknown"
 	Commit    = "unknown"
 )
@@ -126,46 +125,14 @@ func showInteractiveLauncher() {
 		fmt.Println("──────────────────")
 		fmt.Println("")
 
-		menuItems := []string{
-			"── Context ──",
-			"Select Project",
-			"Select Project (Full Access)",
-			"New Project",
-			"",
-			"── Information ──",
-			"Projects Overview",
-			"Active Runners",
-			"State (not implemented)",
-			"Task Queue (not implemented)",
-			"",
-			"── Configuration ──",
-			"Show Config (not implemented)",
-			"Operational Mode (not implemented)",
-			"Token Budget (not implemented)",
-			"",
-			"Exit",
-		}
-
-		prompt := promptui.Select{
-			Label: "Choose action",
-			Items: menuItems,
-			Size:  20,
-			Templates: &promptui.SelectTemplates{
-				Label:    "{{ . }}",
-				Active:   "\U0001F680 {{ . | cyan }}",
-				Inactive: "  {{ . }}",
-				Selected: "\U0001F680 {{ . | green }}",
-			},
-		}
-
-		idx, result, err := prompt.Run()
+		result, err := ui.MainMenuSelector()
 		if err != nil {
 			fmt.Printf("Prompt failed: %v\n", err)
 			return
 		}
 
 		// Skip separator rows
-		if result == "" || strings.HasPrefix(result, "──") {
+		if ui.IsSeparatorOrEmpty(result) {
 			continue
 		}
 
@@ -193,10 +160,6 @@ func showInteractiveLauncher() {
 		case "Exit":
 			fmt.Println("\nExiting Stratavore launcher.")
 			return
-		default:
-			if idx == len(menuItems)-1 {
-				return
-			}
 		}
 	}
 }
@@ -223,19 +186,7 @@ func selectProject(godMode bool) {
 		return
 	}
 
-	projectNames := make([]string, len(resp.Projects))
-	for i, p := range resp.Projects {
-		projectNames[i] = fmt.Sprintf("%-20s [%s, %d runners]",
-			truncate(p.Name, 20), p.Status, p.ActiveRunners)
-	}
-
-	prompt := promptui.Select{
-		Label: "Select project to launch",
-		Items: projectNames,
-		Size:  10,
-	}
-
-	idx, _, err := prompt.Run()
+	idx, err := ui.ProjectSelector(resp.Projects)
 	if err != nil {
 		return
 	}
@@ -294,17 +245,7 @@ func showSingleRunnerChoice(runner *types.Runner, projectName string, ctx contex
 	fmt.Printf("\nFound 1 active runner for %s\n", projectName)
 	fmt.Printf("  Runner ID: %s (started %v)\n", runner.ID, runner.StartedAt)
 
-	options := []string{
-		"Attach to existing runner",
-		"Launch new runner",
-	}
-
-	prompt := promptui.Select{
-		Label: "Choose action",
-		Items: options,
-	}
-
-	idx, _, err := prompt.Run()
+	idx, err := ui.RunnerActionSelector()
 	if err != nil {
 		return
 	}
@@ -323,21 +264,7 @@ func showSingleRunnerChoice(runner *types.Runner, projectName string, ctx contex
 func showRunnerPicker(runners []*types.Runner, projectName string, ctx context.Context, db *storage.PostgresClient, cfg *config.Config) {
 	fmt.Printf("\nFound %d active runners for %s:\n", len(runners), projectName)
 
-	runnerLabels := make([]string, len(runners)+1)
-	for i, r := range runners {
-		uptime := time.Since(r.StartedAt).Round(time.Second)
-		runnerLabels[i] = fmt.Sprintf("%s (started %v ago)",
-			truncate(r.ID, 30), uptime)
-	}
-	runnerLabels[len(runners)] = "Launch new runner"
-
-	prompt := promptui.Select{
-		Label: "Select runner to attach or launch new",
-		Items: runnerLabels,
-		Size:  10,
-	}
-
-	idx, _, err := prompt.Run()
+	idx, err := ui.RunnerSelector(runners, projectName)
 	if err != nil {
 		return
 	}
@@ -892,13 +819,8 @@ var projectsDeleteCmd = &cobra.Command{
 		projectName := args[0]
 
 		// Confirmation prompt
-		prompt := promptui.Prompt{
-			Label:     fmt.Sprintf("Delete project '%s'? This cannot be undone", projectName),
-			IsConfirm: true,
-		}
-
-		result, err := prompt.Run()
-		if err != nil || result != "y" {
+		confirmed, err := ui.ConfirmationPrompt(fmt.Sprintf("Delete project '%s'? This cannot be undone", projectName))
+		if err != nil || !confirmed {
 			fmt.Println("Deletion cancelled")
 			return
 		}
@@ -1405,33 +1327,10 @@ func resumeConversationSession(projectName string) error {
 		selectedSession = resumableSessions[0]
 		fmt.Printf("Found 1 resumable session for project '%s'\n", projectName)
 	} else {
-		// Multiple sessions: show interactive promptui picker
+		// Multiple sessions: show interactive huh picker
 		fmt.Printf("\nFound %d resumable sessions for project '%s':\n", len(resumableSessions), projectName)
 
-		sessionLabels := make([]string, len(resumableSessions))
-		for i, s := range resumableSessions {
-			uptime := time.Since(s.StartedAt).Round(time.Second)
-			summary := s.Summary
-			if summary == "" {
-				summary = "(no summary)"
-			}
-			// Format: ID (started X ago, tokens: Y, messages: Z) - summary
-			label := fmt.Sprintf("%s (started %v ago, tokens: %d, messages: %d) - %s",
-				truncate(s.ID, 20),
-				formatDuration(uptime),
-				s.TokensUsed,
-				s.MessageCount,
-				truncate(summary, 40))
-			sessionLabels[i] = label
-		}
-
-		prompt := promptui.Select{
-			Label: "Select session to resume",
-			Items: sessionLabels,
-			Size:  10,
-		}
-
-		idx, _, err := prompt.Run()
+		idx, err := ui.SessionSelector(resumableSessions)
 		if err != nil {
 			return err
 		}

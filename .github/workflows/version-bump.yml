@@ -1,24 +1,29 @@
 name: Version Bump
 
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - 'VERSION'
-      - '.github/workflows/version-bump.yml'
+  pull_request:
+    types: [closed]
 
+# Only run when the PR is merged
 jobs:
   bump-version:
+    # ISSUE #1: Prevent infinite loop - skip if this is a version-bump PR
+    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main' && !startsWith(github.event.pull_request.head.ref, 'version-bump/')
     runs-on: ubuntu-latest
-    # Skip if commit message contains [skip ci] or is already a version bump
-    if: "!contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event.head_commit.message, 'chore: bump version')"
+    permissions:
+      contents: write  # Required to push back to repo
+      pull-requests: write  # Required to create PRs
+    env:
+      # ISSUE #3: Script injection - move PR title and body to job-level env vars for safe interpolation
+      PR_TITLE: ${{ github.event.pull_request.title }}
+      PR_BODY: ${{ github.event.pull_request.body }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: main  # ISSUE #2: Use main branch for synthetic merge checkout
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure Git
@@ -29,7 +34,6 @@ jobs:
       - name: Get current version
         id: current_version
         run: |
-          # Read VERSION file (e.g., "1.4.0")
           CURRENT_VERSION=$(cat VERSION)
           echo "version=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
           echo "Current version: ${CURRENT_VERSION}"
@@ -37,32 +41,29 @@ jobs:
       - name: Determine bump type
         id: bump_type
         run: |
-          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          # ISSUE #5: Check both title AND body for breaking changes
+          COMMIT_MSG="$PR_TITLE"
+          PR_BODY_TEXT="$PR_BODY"
 
-          # Parse first line of commit message for conventional commits
-          FIRST_LINE=$(echo "$COMMIT_MSG" | head -1)
-
-          # Check for BREAKING CHANGE in full message (indicates major bump)
-          if echo "$COMMIT_MSG" | grep -qiE "^BREAKING CHANGE:|breaking change:"; then
-            echo "type=major" >> $GITHUB_OUTPUT
-            echo "Bump type: MAJOR (breaking change detected)"
-          # Check for feat: or feature: (minor bump)
-          elif echo "$FIRST_LINE" | grep -qiE "^feat(\(.+\))?:|^feature:"; then
-            echo "type=minor" >> $GITHUB_OUTPUT
-            echo "Bump type: MINOR (feature)"
-          # Check for fix: or bugfix: (patch bump)
-          elif echo "$FIRST_LINE" | grep -qiE "^fix(\(.+\))?:|^bugfix:"; then
-            echo "type=patch" >> $GITHUB_OUTPUT
-            echo "Bump type: PATCH (bugfix)"
-          # Check for major: prefix
-          elif echo "$FIRST_LINE" | grep -qiE "^major:"; then
-            echo "type=major" >> $GITHUB_OUTPUT
-            echo "Bump type: MAJOR (explicit major prefix)"
-          # Default to patch for any other commit
+          if echo "$COMMIT_MSG" | grep -qiE "^BREAKING CHANGE:|^breaking change:" || \
+             echo "$PR_BODY_TEXT" | grep -qiE "^BREAKING CHANGE:|^breaking change:"; then
+            BUMP_TYPE="major"
+          elif echo "$COMMIT_MSG" | grep -qiE "^feat(\(.+\))?:|^feature:"; then
+            BUMP_TYPE="minor"
+          elif echo "$COMMIT_MSG" | grep -qiE "^fix(\(.+\))?:|^bugfix:"; then
+            BUMP_TYPE="patch"
+          elif echo "$COMMIT_MSG" | grep -qiE "^major:"; then
+            BUMP_TYPE="major"
           else
-            echo "type=patch" >> $GITHUB_OUTPUT
-            echo "Bump type: PATCH (default)"
+            BUMP_TYPE="patch"
           fi
+
+          echo "type=$BUMP_TYPE" >> $GITHUB_OUTPUT
+
+      - name: Output bump type
+        # ISSUE #4: Move echo statement to separate step after bump_type completes
+        run: |
+          echo "Bump type: ${{ steps.bump_type.outputs.type }}"
 
       - name: Bump version
         id: new_version
@@ -70,10 +71,8 @@ jobs:
           CURRENT_VERSION="${{ steps.current_version.outputs.version }}"
           BUMP_TYPE="${{ steps.bump_type.outputs.type }}"
 
-          # Parse current version (e.g., "1.4.0")
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
 
-          # Calculate new version based on bump type
           case "$BUMP_TYPE" in
             major)
               NEW_MAJOR=$((MAJOR + 1))
@@ -97,48 +96,31 @@ jobs:
           echo "New version: ${NEW_VERSION}"
 
       - name: Update VERSION file
-        run: |
-          echo "${{ steps.new_version.outputs.version }}" > VERSION
-          echo "VERSION file updated to ${{ steps.new_version.outputs.version }}"
+        run: echo "${{ steps.new_version.outputs.version }}" > VERSION
 
       - name: Update version in stratavored
         run: |
-          sed -i "s/Version   = \"[^\"]*\"/Version   = \"${{ steps.new_version.outputs.version }}\"/" cmd/stratavored/main.go
+          # ISSUE #8: Robust sed patterns - handle variable whitespace, preserve original formatting
+          sed -i -E "s/(Version[[:space:]]*=[[:space:]]*)\"[^\"]*\"/\1\"${{ steps.new_version.outputs.version }}\"/" cmd/stratavored/main.go
           echo "Updated cmd/stratavored/main.go"
 
       - name: Update version in stratavore CLI
         run: |
-          sed -i "s/Version   = \"[^\"]*\"/Version   = \"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore/main.go
+          # ISSUE #8: Robust sed patterns - handle variable whitespace, preserve original formatting
+          sed -i -E "s/(Version[[:space:]]*=[[:space:]]*)\"[^\"]*\"/\1\"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore/main.go
           echo "Updated cmd/stratavore/main.go"
 
       - name: Update version in stratavore-agent
         run: |
-          sed -i "s/Version     = \"[^\"]*\"/Version     = \"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore-agent/main.go
+          # ISSUE #8: Robust sed patterns - handle variable whitespace, preserve original formatting
+          sed -i -E "s/(Version[[:space:]]*=[[:space:]]*)\"[^\"]*\"/\1\"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore-agent/main.go
           echo "Updated cmd/stratavore-agent/main.go"
 
       - name: Update version in stratavore-migrate
         run: |
-          sed -i "s/Version   = \"[^\"]*\"/Version   = \"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore-migrate/main.go
+          # ISSUE #8: Robust sed patterns - handle variable whitespace, preserve original formatting
+          sed -i -E "s/(Version[[:space:]]*=[[:space:]]*)\"[^\"]*\"/\1\"${{ steps.new_version.outputs.version }}\"/" cmd/stratavore-migrate/main.go
           echo "Updated cmd/stratavore-migrate/main.go"
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Build binaries for verification
-        run: make build
-
-      - name: Verify bin/ artifacts
-        run: |
-          echo "Verifying bin/ artifacts..."
-          ls -lh bin/
-          test -f bin/stratavore || (echo "bin/stratavore not found" && exit 1)
-          test -f bin/stratavored || (echo "bin/stratavored not found" && exit 1)
-          test -f bin/stratavore-agent || (echo "bin/stratavore-agent not found" && exit 1)
-          test -f bin/stratavore-migrate || (echo "bin/stratavore-migrate not found" && exit 1)
-          echo "All artifacts verified"
 
       - name: Verify version updates
         run: |
@@ -146,40 +128,189 @@ jobs:
           cat VERSION
           echo ""
           echo "=== stratavored version ==="
-          grep 'Version   =' cmd/stratavored/main.go
+          grep -E 'Version[[:space:]]*=' cmd/stratavored/main.go
           echo ""
           echo "=== stratavore version ==="
-          grep 'Version   =' cmd/stratavore/main.go
+          grep -E 'Version[[:space:]]*=' cmd/stratavore/main.go
           echo ""
           echo "=== stratavore-agent version ==="
-          grep 'Version     =' cmd/stratavore-agent/main.go
+          grep -E 'Version[[:space:]]*=' cmd/stratavore-agent/main.go
           echo ""
           echo "=== stratavore-migrate version ==="
-          grep 'Version   =' cmd/stratavore-migrate/main.go
+          grep -E 'Version[[:space:]]*=' cmd/stratavore-migrate/main.go
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build binaries
+        run: make build
+
+      - name: Verify bin artifacts
+        run: |
+          for b in bin/stratavore bin/stratavored bin/stratavore-agent bin/stratavore-migrate; do
+            test -f "$b" || (echo "$b missing" && exit 1)
+          done
+
+      - name: Create version bump branch
+        id: create_branch
+        run: |
+          # ISSUE #9: Use consistent version-bump/ prefix pattern
+          # Make idempotent - delete existing branch and recreate to avoid checkout conflicts
+          BRANCH_NAME="version-bump/${{ steps.new_version.outputs.version }}"
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+
+          # Delete local branch if it exists (with uncommitted changes, checkout fails)
+          if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
+            git branch -D "$BRANCH_NAME"
+          fi
+
+          # Delete remote branch if it exists (force-push will update it anyway)
+          # Use git ls-remote to query remote directly (more reliable than stale tracking refs)
+          # Use grep -qF for fixed-string match (branch name contains dots)
+          if git ls-remote --heads origin "$BRANCH_NAME" | grep -qF "$BRANCH_NAME"; then
+            git push origin --delete "$BRANCH_NAME" || true
+          fi
+
+          # Create fresh branch
+          git checkout -b "$BRANCH_NAME"
 
       - name: Commit version bump
         run: |
           git add VERSION cmd/stratavored/main.go cmd/stratavore/main.go cmd/stratavore-agent/main.go cmd/stratavore-migrate/main.go
-          git commit -m "chore: bump version to ${{ steps.new_version.outputs.version }} [skip ci]"
-          echo "Committed version bump"
+          # ISSUE #7: Replace || echo with explicit git diff check for failure detection
+          if git diff --cached --exit-code > /dev/null; then
+            echo "No changes to commit (all files already up-to-date)"
+          else
+            git commit -m "chore: bump version to ${{ steps.new_version.outputs.version }}"
+          fi
 
-      - name: Create git tag
+      - name: Push version-bump branch
+        # ISSUE #11: Explicit error handling for git operations
+        # Use force-push since we delete and recreate the branch for idempotency
+        # Reuse BRANCH_NAME from create_branch step to avoid drift
         run: |
-          git tag -a "v${{ steps.new_version.outputs.version }}" -m "Release v${{ steps.new_version.outputs.version }}"
-          echo "Created git tag v${{ steps.new_version.outputs.version }}"
+          if ! git push --force-with-lease origin "${{ steps.create_branch.outputs.branch_name }}"; then
+            echo "Error: Failed to push version-bump branch"
+            exit 1
+          fi
 
-      - name: Push changes and tag
+      - name: Ensure labels exist
+        # Create labels if they don't exist (idempotent)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git push origin main
-          git push origin "v${{ steps.new_version.outputs.version }}"
-          echo "Pushed changes and tag to origin"
+          gh label create "chore" --description "Chore: maintenance tasks" --color "d4c5f9" --force || true
+          gh label create "automated" --description "Automated PR" --color "0e8a16" --force || true
+
+      - name: Create pull request
+        # Use LEXCODE_TOKEN instead of GITHUB_TOKEN to allow PR to trigger workflows
+        # PRs created with GITHUB_TOKEN don't trigger other workflows (GitHub security feature)
+        id: create_pr
+        env:
+          GH_TOKEN: ${{ secrets.LEXCODE_TOKEN }}
+        run: |
+          # ISSUE #11: Explicit error handling for PR creation
+          # Build PR body in file to avoid YAML syntax issues with embedded colons
+          BUMP_TYPE="${{ steps.bump_type.outputs.type }}"
+          PR_NUM="${{ github.event.pull_request.number }}"
+          OLD_VER="${{ steps.current_version.outputs.version }}"
+          NEW_VER="${{ steps.new_version.outputs.version }}"
+
+          # Create PR body file using printf to avoid YAML heredoc issues
+          printf "Version bump triggered by merged PR #%s\n\n" "$PR_NUM" > /tmp/pr_body.txt
+          printf "Automated version bump from %s to %s.\n\n" "$OLD_VER" "$NEW_VER" >> /tmp/pr_body.txt
+          printf "Bump type: %s\n" "$BUMP_TYPE" >> /tmp/pr_body.txt
+          printf "Original PR: #%s (%s)\n" "$PR_NUM" "$PR_TITLE" >> /tmp/pr_body.txt
+
+          # Check for existing PR on this branch (idempotency)
+          EXISTING_PR=$(gh pr list --head "version-bump/$NEW_VER" --json url --jq '.[0].url' || echo "")
+
+          if [ -n "$EXISTING_PR" ]; then
+            echo "Found existing PR: $EXISTING_PR"
+            PR_URL="$EXISTING_PR"
+          else
+            echo "Creating new PR..."
+            PR_URL=$(gh pr create \
+              --base main \
+              --head "version-bump/$NEW_VER" \
+              --title "chore: bump version to $NEW_VER" \
+              --body-file /tmp/pr_body.txt \
+              --label "chore" \
+              --label "automated")
+          fi
+
+          if [ -z "$PR_URL" ]; then
+            echo "Error: Failed to create or find pull request"
+            exit 1
+          fi
+
+          echo "Created PR: $PR_URL"
+
+          # Extract PR number from URL
+          PR_NUMBER=$(echo "$PR_URL" | grep -oP '\d+$')
+          if [ -z "$PR_NUMBER" ]; then
+            echo "::error::Failed to extract PR number from URL: $PR_URL"
+            exit 1
+          fi
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
+
+      - name: Auto-approve PR
+        # Use LexCode OAuth token to approve version-bump PR
+        # LexCode is Meridian-Lex's OAuth app with repo approval permissions
+        # Token must be stored as repository secret: LEXCODE_TOKEN
+        env:
+          GH_TOKEN: ${{ secrets.LEXCODE_TOKEN }}
+        run: |
+          # Approve the PR using LexCode token (if configured)
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::LEXCODE_TOKEN not configured - skipping auto-approval"
+            echo "PR created but requires manual approval before auto-merge can proceed."
+          elif ! gh pr review "${{ steps.create_pr.outputs.PR_NUMBER }}" \
+            --repo "${{ github.repository }}" \
+            --approve \
+            --body "Automated approval by LexCode for version bump to ${{ steps.new_version.outputs.version }}"; then
+            echo "::warning::Failed to auto-approve PR #${{ steps.create_pr.outputs.PR_NUMBER }}"
+            echo "PR created but requires manual approval before auto-merge can proceed."
+          else
+            echo "PR #${{ steps.create_pr.outputs.PR_NUMBER }} auto-approved by LexCode"
+          fi
+
+      - name: Enable auto-merge
+        # ISSUE #12: Enable GitHub auto-merge for automated version bump PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Enable auto-merge using captured PR number (requires branch protection and passing checks)
+          if ! gh pr merge "${{ steps.create_pr.outputs.PR_NUMBER }}" \
+            --auto \
+            --merge \
+            --delete-branch; then
+            echo "::warning::Failed to enable auto-merge for PR #${{ steps.create_pr.outputs.PR_NUMBER }}"
+            echo "This may indicate auto-merge is not enabled in repository settings or branch protection is misconfigured."
+            echo "See .github/AUTO-MERGE-SETUP.md for configuration requirements."
+            # Don't fail the workflow - PR was still created successfully
+          else
+            echo "Auto-merge enabled for PR #${{ steps.create_pr.outputs.PR_NUMBER }}"
+          fi
 
       - name: Report version bump
         run: |
           echo "Version Bump Summary"
-          echo "===================="
           echo "Previous: ${{ steps.current_version.outputs.version }}"
           echo "Current:  ${{ steps.new_version.outputs.version }}"
           echo "Type:     ${{ steps.bump_type.outputs.type }}"
-          echo "Commit:   ${{ github.event.head_commit.id }}"
-          echo "Message:  ${{ github.event.head_commit.message }}"
+          echo "PR:       ${{ github.event.pull_request.number }}"
+          echo "Title:    $PR_TITLE"
+
+          # Write to GitHub step summary for better visibility
+          {
+            echo "## Version Bump Summary"
+            echo "- **Previous Version:** ${{ steps.current_version.outputs.version }}"
+            echo "- **New Version:** ${{ steps.new_version.outputs.version }}"
+            echo "- **Bump Type:** ${{ steps.bump_type.outputs.type }}"
+            echo "- **Trigger PR:** #${{ github.event.pull_request.number }}"
+            echo "- **PR Title:** $PR_TITLE"
+          } >> $GITHUB_STEP_SUMMARY

@@ -21,12 +21,14 @@ import (
 
 // HTTPServer provides REST API for CLI communication
 type HTTPServer struct {
-	server       *http.Server
-	handler      *GRPCServer // Reuse gRPC handler logic
-	logger       *zap.Logger
-	fleet        *FleetHandler
-	agentManager *AgentManager
-	startedAt    time.Time
+	server              *http.Server
+	handler             *GRPCServer // Reuse gRPC handler logic
+	logger              *zap.Logger
+	fleet               *FleetHandler
+	agentManager        *AgentManager
+	agentAdapter        *AgentAdapter
+	compatibilityStatus *CompatibilityStatusHandler
+	startedAt           time.Time
 }
 
 // NewHTTPServer creates HTTP API server.
@@ -43,7 +45,11 @@ func NewHTTPServer(port int, handler *GRPCServer, logger *zap.Logger, cfg *confi
 		startedAt:    time.Now(),
 	}
 
-	// Register routes
+	// Initialize WebUI compatibility adapters
+	httpServer.agentAdapter = NewAgentAdapter(handler, logger)
+	httpServer.compatibilityStatus = NewCompatibilityStatusHandler(handler, httpServer.agentAdapter, logger)
+
+	// Register routes (v1 API)
 	mux.HandleFunc("/api/v1/runners/launch", httpServer.handleLaunchRunner)
 	mux.HandleFunc("/api/v1/runners/stop", httpServer.handleStopRunner)
 	mux.HandleFunc("/api/v1/runners/list", httpServer.handleListRunners)
@@ -87,6 +93,20 @@ func NewHTTPServer(port int, handler *GRPCServer, logger *zap.Logger, cfg *confi
 	// Model registry
 	mux.HandleFunc("/api/v1/models", httpServer.handleListModels)
 	mux.HandleFunc("/api/v1/models/", httpServer.handleUpdateModel)
+
+	// WebUI Compatibility Routes (adapter layer for legacy WebUI)
+	mux.HandleFunc("/api/status", httpServer.compatibilityStatus.HandleStatus)
+	mux.HandleFunc("/api/health", httpServer.handleHealth) // Shared with v1
+	mux.HandleFunc("/api/agents", httpServer.agentAdapter.HandleListAgents)
+	mux.HandleFunc("/api/agents/spawn", httpServer.agentAdapter.HandleSpawnAgent)
+	mux.HandleFunc("/api/agents/", httpServer.handleAgentRoutes)
+
+	// Legacy endpoint aliases (for backward compatibility)
+	mux.HandleFunc("/api/spawn-agent", httpServer.agentAdapter.HandleSpawnAgent)
+	mux.HandleFunc("/api/assign-agent", httpServer.agentAdapter.HandleAssignAgentLegacy)
+	mux.HandleFunc("/api/agent-status", httpServer.agentAdapter.HandleUpdateAgentStatusLegacy)
+	mux.HandleFunc("/api/kill-agent", httpServer.agentAdapter.HandleKillAgentLegacy)
+	mux.HandleFunc("/api/complete-task", httpServer.agentAdapter.HandleCompleteTask)
 
 	// Build middleware chain: rate-limit → JWT auth → mux
 	var handler_ http.Handler = mux
@@ -851,6 +871,32 @@ func (s *HTTPServer) handleUpdateModel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.respondJSON(w, map[string]string{"status": "updated"})
+}
+
+// handleAgentRoutes routes dynamic agent endpoints to appropriate handlers.
+func (s *HTTPServer) handleAgentRoutes(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+
+	// Route to appropriate handler based on path suffix
+	if len(path) > len("/api/agents/") {
+		if containsSuffix(path, "/assign") {
+			s.agentAdapter.HandleAssignAgent(w, r)
+		} else if containsSuffix(path, "/status") {
+			s.agentAdapter.HandleUpdateAgentStatus(w, r)
+		} else if containsSuffix(path, "/kill") {
+			s.agentAdapter.HandleKillAgent(w, r)
+		} else {
+			// No suffix - get agent by ID
+			s.agentAdapter.HandleGetAgent(w, r)
+		}
+	} else {
+		http.Error(w, "Not found", http.StatusNotFound)
+	}
+}
+
+// containsSuffix checks if path contains suffix.
+func containsSuffix(path, suffix string) bool {
+	return len(path) >= len(suffix) && path[len(path)-len(suffix):] == suffix
 }
 
 func (s *HTTPServer) handleExecuteSprint(w http.ResponseWriter, r *http.Request) {
