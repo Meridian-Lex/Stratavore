@@ -1437,24 +1437,17 @@ func (c *PostgresClient) GetDailyTokenBudget(ctx context.Context) (*types.TokenB
 // ===== AGENT PERSONALITY METHODS =====
 
 // GetAgentByID retrieves an agent personality by ID with concrete type-safe access
-func (c *PostgresClient) GetAgentByID(ctx context.Context, agentID string) (*api.AgentPersonality, error) {
-	row := c.pool.QueryRow(ctx, `
-		SELECT id, agent_name, specialization, personality_traits,
-		       current_rank, rank_progress, strikes,
-		       total_missions, successful_missions, failed_missions,
-		       total_tokens_used, total_runtime_hours,
-		       created_at, last_active_at, updated_at
-		FROM agent_personalities
-		WHERE id = $1
-	`, agentID)
-
+// scanAgentRow scans agent row data and maps it to an AgentPersonality struct
+func scanAgentRow(scanner interface {
+	Scan(dest ...interface{}) error
+}) (*api.AgentPersonality, error) {
 	agent := &api.AgentPersonality{}
 	var specialization *string
 	var lastActiveAt *time.Time
 	var personalityTraits []byte
 	var createdAt, updatedAt time.Time
 
-	err := row.Scan(
+	err := scanner.Scan(
 		&agent.ID,
 		&agent.AgentName,
 		&specialization,
@@ -1471,14 +1464,11 @@ func (c *PostgresClient) GetAgentByID(ctx context.Context, agentID string) (*api
 		&lastActiveAt,
 		&updatedAt,
 	)
-
-	if err == pgx.ErrNoRows {
-		return nil, fmt.Errorf("agent not found: %s", agentID)
-	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to get agent: %w", err)
+		return nil, err
 	}
 
+	// Map nullable and formatted fields
 	if specialization != nil {
 		agent.Specialization = *specialization
 	}
@@ -1502,10 +1492,35 @@ func (c *PostgresClient) GetAgentByID(ctx context.Context, agentID string) (*api
 	return agent, nil
 }
 
+func (c *PostgresClient) GetAgentByID(ctx context.Context, agentID string) (*api.AgentPersonality, error) {
+	row := c.pool.QueryRow(ctx, `
+		SELECT id, agent_name, specialization, personality_traits,
+		       current_rank, rank_progress, strikes,
+		       total_missions, successful_missions, failed_missions,
+		       total_tokens_used, total_runtime_hours,
+		       created_at, last_active_at, updated_at
+		FROM agent_personalities
+		WHERE id = $1
+	`, agentID)
+
+	agent, err := scanAgentRow(row)
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("agent not found: %s", agentID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get agent: %w", err)
+	}
+
+	return agent, nil
+}
+
 // ListAgents retrieves all agent personalities with pagination
 func (c *PostgresClient) ListAgents(ctx context.Context, limit, offset int32) ([]*api.AgentPersonality, int32, error) {
 	if limit <= 0 {
 		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
 	}
 	if offset < 0 {
 		offset = 0
@@ -1536,52 +1551,10 @@ func (c *PostgresClient) ListAgents(ctx context.Context, limit, offset int32) ([
 
 	agents := []*api.AgentPersonality{}
 	for rows.Next() {
-		agent := &api.AgentPersonality{}
-		var specialization *string
-		var lastActiveAt *time.Time
-		var personalityTraits []byte
-		var createdAt, updatedAt time.Time
-
-		err := rows.Scan(
-			&agent.ID,
-			&agent.AgentName,
-			&specialization,
-			&personalityTraits,
-			&agent.CurrentRank,
-			&agent.RankProgress,
-			&agent.Strikes,
-			&agent.TotalMissions,
-			&agent.SuccessfulMissions,
-			&agent.FailedMissions,
-			&agent.TotalTokensUsed,
-			&agent.TotalRuntimeHours,
-			&createdAt,
-			&lastActiveAt,
-			&updatedAt,
-		)
+		agent, err := scanAgentRow(rows)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan agent: %w", err)
 		}
-
-		if specialization != nil {
-			agent.Specialization = *specialization
-		}
-		if lastActiveAt != nil {
-			agent.LastActiveAt = api.FormatTime(*lastActiveAt)
-		}
-		agent.CreatedAt = api.FormatTime(createdAt)
-		agent.UpdatedAt = api.FormatTime(updatedAt)
-
-		// Unmarshal personality traits from JSON byte array
-		if len(personalityTraits) > 0 {
-			err = json.Unmarshal(personalityTraits, &agent.PersonalityTraits)
-			if err != nil {
-				agent.PersonalityTraits = make(map[string]interface{})
-			}
-		} else {
-			agent.PersonalityTraits = make(map[string]interface{})
-		}
-
 		agents = append(agents, agent)
 	}
 
