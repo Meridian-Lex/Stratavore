@@ -150,7 +150,14 @@ func run() error {
 	agentManager := daemon.NewAgentManager(db, logger)
 
 	// Start HTTP API server
-	httpServer := daemon.NewHTTPServer(cfg.Daemon.Port_HTTP, apiHandler, logger, &cfg.Security, fleetHandler, agentManager)
+	httpServer := daemon.NewHTTPServer(daemon.HTTPServerOptions{
+		Port:         cfg.Daemon.Port_HTTP,
+		Handler:      apiHandler,
+		Logger:       logger,
+		SecurityCfg:  &cfg.Security,
+		Fleet:        fleetHandler,
+		AgentManager: agentManager,
+	})
 	go func() {
 		if err := httpServer.Start(); err != nil {
 			logger.Error("HTTP API server error", zap.Error(err))

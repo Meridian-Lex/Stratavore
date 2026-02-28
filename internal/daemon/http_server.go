@@ -31,23 +31,33 @@ type HTTPServer struct {
 	startedAt           time.Time
 }
 
+// HTTPServerOptions configures HTTPServer creation
+type HTTPServerOptions struct {
+	Port         int
+	Handler      *GRPCServer
+	Logger       *zap.Logger
+	SecurityCfg  *config.SecurityConfig
+	Fleet        *FleetHandler
+	AgentManager *AgentManager
+}
+
 // NewHTTPServer creates HTTP API server.
 // It wires JWT auth and per-client rate limiting when the corresponding
 // config values are set; both default to disabled/permissive.
-func NewHTTPServer(port int, handler *GRPCServer, logger *zap.Logger, cfg *config.SecurityConfig, fleet *FleetHandler, agentManager *AgentManager) *HTTPServer {
+func NewHTTPServer(opts HTTPServerOptions) *HTTPServer {
 	mux := http.NewServeMux()
 
 	httpServer := &HTTPServer{
-		handler:      handler,
-		logger:       logger,
-		fleet:        fleet,
-		agentManager: agentManager,
+		handler:      opts.Handler,
+		logger:       opts.Logger,
+		fleet:        opts.Fleet,
+		agentManager: opts.AgentManager,
 		startedAt:    time.Now(),
 	}
 
 	// Initialize WebUI compatibility adapters
-	httpServer.agentAdapter = NewAgentAdapter(handler, logger)
-	httpServer.compatibilityStatus = NewCompatibilityStatusHandler(handler, httpServer.agentAdapter, logger)
+	httpServer.agentAdapter = NewAgentAdapter(opts.Handler, opts.Logger)
+	httpServer.compatibilityStatus = NewCompatibilityStatusHandler(opts.Handler, httpServer.agentAdapter, opts.Logger)
 
 	// Register routes (v1 API)
 	mux.HandleFunc("/api/v1/runners/launch", httpServer.handleLaunchRunner)
@@ -112,34 +122,34 @@ func NewHTTPServer(port int, handler *GRPCServer, logger *zap.Logger, cfg *confi
 	var handler_ http.Handler = mux
 
 	// JWT auth (disabled when auth_secret is empty)
-	if cfg != nil {
-		validator := auth.NewValidator(cfg.AuthSecret)
+	if opts.SecurityCfg != nil {
+		validator := auth.NewValidator(opts.SecurityCfg.AuthSecret)
 		if validator.Enabled() {
-			logger.Info("HTTP API auth enabled")
+			opts.Logger.Info("HTTP API auth enabled")
 		} else {
-			logger.Info("HTTP API auth disabled (no auth_secret configured)")
+			opts.Logger.Info("HTTP API auth disabled (no auth_secret configured)")
 		}
 		handler_ = auth.Middleware(validator)(handler_)
 
 		// Rate limiting (always active; defaults to 300 req/min, burst 50)
-		ratePerMin := cfg.RateLimit.RequestsPerMinute
+		ratePerMin := opts.SecurityCfg.RateLimit.RequestsPerMinute
 		if ratePerMin <= 0 {
 			ratePerMin = 300
 		}
-		burst := cfg.RateLimit.Burst
+		burst := opts.SecurityCfg.RateLimit.Burst
 		if burst <= 0 {
 			burst = 50
 		}
 		rl := auth.NewRateLimiter(ratePerMin, time.Minute, burst)
 		handler_ = auth.RateLimitMiddleware(rl)(handler_)
 
-		logger.Info("HTTP API rate limiting enabled",
+		opts.Logger.Info("HTTP API rate limiting enabled",
 			zap.Int("requests_per_minute", ratePerMin),
 			zap.Int("burst", burst))
 	}
 
 	httpServer.server = &http.Server{
-		Addr:         fmt.Sprintf(":%d", port),
+		Addr:         fmt.Sprintf(":%d", opts.Port),
 		Handler:      handler_,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,

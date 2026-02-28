@@ -54,12 +54,6 @@ func (c *PostgresClient) BeginTx(ctx context.Context) (pgx.Tx, error) {
 	return c.pool.Begin(ctx)
 }
 
-// GetPool returns the underlying pgxpool.Pool for direct access
-// Deprecated: Use type-specific methods instead to maintain abstraction
-func (c *PostgresClient) GetPool() *pgxpool.Pool {
-	return c.pool
-}
-
 // ===== PROJECTS =====
 
 // CreateProject creates a new project

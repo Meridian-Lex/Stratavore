@@ -280,13 +280,6 @@ func showRunnerPicker(runners []*types.Runner, projectName string, ctx context.C
 }
 
 func launchNewRunner(ctx context.Context, db *storage.PostgresClient, projectName string, cfg *config.Config) {
-	// Get project details from database
-	project, err := db.GetProject(ctx, projectName)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Project not found: %s\n", projectName)
-		os.Exit(1)
-	}
-
 	// Create API client
 	apiClient := getAPIClient()
 
@@ -296,10 +289,21 @@ func launchNewRunner(ctx context.Context, db *storage.PostgresClient, projectNam
 		os.Exit(1)
 	}
 
+	// Get project details from daemon API (instead of direct DB access)
+	projectResp, err := apiClient.GetProject(ctx, &api.GetProjectRequest{Name: projectName})
+	if err != nil || projectResp.Error != "" {
+		errMsg := err
+		if projectResp != nil && projectResp.Error != "" {
+			errMsg = fmt.Errorf("%s", projectResp.Error)
+		}
+		fmt.Fprintf(os.Stderr, "Error: Project not found: %s (%v)\n", projectName, errMsg)
+		os.Exit(1)
+	}
+
 	// Build launch request
 	req := &api.LaunchRunnerRequest{
 		ProjectName:      projectName,
-		ProjectPath:      project.Path,
+		ProjectPath:      projectResp.Project.Path,
 		ConversationMode: "new",
 		RuntimeType:      "process",
 	}
