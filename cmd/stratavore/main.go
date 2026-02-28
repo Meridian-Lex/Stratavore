@@ -289,21 +289,10 @@ func launchNewRunner(ctx context.Context, db *storage.PostgresClient, projectNam
 		os.Exit(1)
 	}
 
-	// Get project details from daemon API (instead of direct DB access)
-	projectResp, err := apiClient.GetProject(ctx, &api.GetProjectRequest{Name: projectName})
-	if err != nil || projectResp.Error != "" {
-		errMsg := err
-		if projectResp != nil && projectResp.Error != "" {
-			errMsg = fmt.Errorf("%s", projectResp.Error)
-		}
-		fmt.Fprintf(os.Stderr, "Error: Project not found: %s (%v)\n", projectName, errMsg)
-		os.Exit(1)
-	}
-
-	// Build launch request
+	// Build launch request (daemon will resolve project path)
 	req := &api.LaunchRunnerRequest{
 		ProjectName:      projectName,
-		ProjectPath:      projectResp.Project.Path,
+		ProjectPath:      "", // Daemon resolves path from project registry
 		ConversationMode: "new",
 		RuntimeType:      "process",
 	}
