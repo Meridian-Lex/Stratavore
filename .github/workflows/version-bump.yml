@@ -184,7 +184,7 @@ jobs:
           if git diff --cached --exit-code > /dev/null; then
             echo "No changes to commit (all files already up-to-date)"
           else
-            git commit -m "chore: bump version to ${{ steps.new_version.outputs.version }} [skip ci]"
+            git commit -m "chore: bump version to ${{ steps.new_version.outputs.version }}"
           fi
 
       - name: Push version-bump branch
