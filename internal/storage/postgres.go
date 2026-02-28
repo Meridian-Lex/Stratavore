@@ -1438,13 +1438,7 @@ func (c *PostgresClient) GetDailyTokenBudget(ctx context.Context) (*types.TokenB
 
 // GetAgentByID retrieves an agent personality by ID with concrete type-safe access
 func (c *PostgresClient) GetAgentByID(ctx context.Context, agentID string) (*api.AgentPersonality, error) {
-	tx, err := c.BeginTx(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	row := tx.QueryRow(ctx, `
+	row := c.pool.QueryRow(ctx, `
 		SELECT id, agent_name, specialization, personality_traits,
 		       current_rank, rank_progress, strikes,
 		       total_missions, successful_missions, failed_missions,
@@ -1460,7 +1454,7 @@ func (c *PostgresClient) GetAgentByID(ctx context.Context, agentID string) (*api
 	var personalityTraits []byte
 	var createdAt, updatedAt time.Time
 
-	err = row.Scan(
+	err := row.Scan(
 		&agent.ID,
 		&agent.AgentName,
 		&specialization,
@@ -1505,10 +1499,6 @@ func (c *PostgresClient) GetAgentByID(ctx context.Context, agentID string) (*api
 		agent.PersonalityTraits = make(map[string]interface{})
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
 	return agent, nil
 }
 
@@ -1518,21 +1508,15 @@ func (c *PostgresClient) ListAgents(ctx context.Context, limit, offset int32) ([
 		limit = 50
 	}
 
-	tx, err := c.BeginTx(ctx)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
 	// Get total count
 	var total int32
-	err = tx.QueryRow(ctx, "SELECT COUNT(*) FROM agent_personalities").Scan(&total)
+	err := c.pool.QueryRow(ctx, "SELECT COUNT(*) FROM agent_personalities").Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to count agents: %w", err)
 	}
 
 	// Get agents
-	rows, err := tx.Query(ctx, `
+	rows, err := c.pool.Query(ctx, `
 		SELECT id, agent_name, specialization, personality_traits,
 		       current_rank, rank_progress, strikes,
 		       total_missions, successful_missions, failed_missions,
@@ -1598,22 +1582,12 @@ func (c *PostgresClient) ListAgents(ctx context.Context, limit, offset int32) ([
 		agents = append(agents, agent)
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return nil, 0, fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
 	return agents, total, nil
 }
 
 // GetMissionByID retrieves a mission by ID with concrete type-safe access
 func (c *PostgresClient) GetMissionByID(ctx context.Context, missionID string) (*api.AgentMission, error) {
-	tx, err := c.BeginTx(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	row := tx.QueryRow(ctx, `
+	row := c.pool.QueryRow(ctx, `
 		SELECT id, agent_id, mission_type, mission_name, mission_description,
 		       project_name, runner_id, session_id, status, result_summary,
 		       tokens_used, runtime_hours, started_at, completed_at, created_at
@@ -1622,9 +1596,11 @@ func (c *PostgresClient) GetMissionByID(ctx context.Context, missionID string) (
 	`, missionID)
 
 	mission := &api.AgentMission{}
-	var missionDesc, projectName, runnerID, sessionID, resultSummary, completedAt *string
+	var missionDesc, projectName, runnerID, sessionID, resultSummary *string
+	var completedAt *time.Time
+	var startedAt, createdAt time.Time
 
-	err = row.Scan(
+	err := row.Scan(
 		&mission.ID,
 		&mission.AgentID,
 		&mission.MissionType,
@@ -1637,9 +1613,9 @@ func (c *PostgresClient) GetMissionByID(ctx context.Context, missionID string) (
 		&resultSummary,
 		&mission.TokensUsed,
 		&mission.RuntimeHours,
-		&mission.StartedAt,
+		&startedAt,
 		&completedAt,
-		&mission.CreatedAt,
+		&createdAt,
 	)
 
 	if err == pgx.ErrNoRows {
@@ -1665,12 +1641,10 @@ func (c *PostgresClient) GetMissionByID(ctx context.Context, missionID string) (
 		mission.ResultSummary = *resultSummary
 	}
 	if completedAt != nil {
-		mission.CompletedAt = *completedAt
+		mission.CompletedAt = api.FormatTime(*completedAt)
 	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
-	}
+	mission.StartedAt = api.FormatTime(startedAt)
+	mission.CreatedAt = api.FormatTime(createdAt)
 
 	return mission, nil
 }
