@@ -23,30 +23,33 @@ func NewIndexer(svc *Service, logger *zap.Logger) *Indexer {
 	return &Indexer{svc: svc, logger: logger}
 }
 
-// IndexAll performs a full initial index of all markdown files in KnowledgeDir.
-// Failures on individual files are logged but do not stop the pass.
+// IndexAll performs a full initial index of all markdown files in KnowledgeDir,
+// recursively traversing subdirectories. Failures on individual files are logged
+// but do not stop the pass.
 func (idx *Indexer) IndexAll(ctx context.Context) {
 	dir := idx.svc.KnowledgeDir()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		idx.logger.Warn("failed to read knowledge dir — skipping initial index",
-			zap.String("dir", dir), zap.Error(err))
-		return
-	}
-
 	idx.logger.Info("starting initial knowledge index pass", zap.String("dir", dir))
 	indexed := 0
-	for _, entry := range entries {
-		if entry.IsDir() || !isMarkdown(entry.Name()) {
-			continue
+	if err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			idx.logger.Warn("walk error during initial index",
+				zap.String("path", path), zap.Error(err))
+			return nil
 		}
-		path := filepath.Join(dir, entry.Name())
+		if d.IsDir() || !isMarkdown(d.Name()) {
+			return nil
+		}
 		if err := idx.svc.IndexFile(ctx, path); err != nil {
 			idx.logger.Warn("failed to index file (initial pass)",
-				zap.String("file", entry.Name()), zap.Error(err))
-			continue
+				zap.String("file", path), zap.Error(err))
+			return nil
 		}
 		indexed++
+		return nil
+	}); err != nil {
+		idx.logger.Warn("failed to walk knowledge dir — skipping initial index",
+			zap.String("dir", dir), zap.Error(err))
+		return
 	}
 	idx.logger.Info("initial knowledge index complete",
 		zap.String("dir", dir), zap.Int("files", indexed))
@@ -82,7 +85,13 @@ func (idx *Indexer) runWatcher(ctx context.Context, dir string) error {
 	}
 	defer watcher.Close()
 
-	if err := watcher.Add(dir); err != nil {
+	// Register all existing directories so subdirectory changes are watched.
+	if err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return nil
+		}
+		return watcher.Add(path)
+	}); err != nil {
 		return err
 	}
 
@@ -101,6 +110,13 @@ func (idx *Indexer) runWatcher(ctx context.Context, dir string) error {
 		case event, ok := <-watcher.Events:
 			if !ok {
 				return nil
+			}
+			// If a directory was created, add it to the watcher.
+			if event.Has(fsnotify.Create) {
+				if fi, err := os.Stat(event.Name); err == nil && fi.IsDir() {
+					_ = watcher.Add(event.Name)
+					continue
+				}
 			}
 			name := filepath.Base(event.Name)
 			if !isMarkdown(name) {

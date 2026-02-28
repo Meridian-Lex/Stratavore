@@ -81,15 +81,15 @@ func ChunkFile(path string) ([]*Chunk, error) {
 		content, _ := os.ReadFile(path)
 		trimmed := strings.TrimSpace(string(content))
 		if len(trimmed) >= minChunkBytes {
-			hash := fmt.Sprintf("%x", sha256.Sum256(content))
-			for i, sub := range splitBySize(trimmed, maxChunkBytes) {
+			parts := splitBySize(trimmed, maxChunkBytes)
+			for i, sub := range parts {
 				section := filename
-				if i > 0 {
-					section = fmt.Sprintf("%s (part %d)", filename, i+1)
+				if len(parts) > 1 {
+					section = fmt.Sprintf("%s (part %d/%d)", filename, i+1, len(parts))
 				}
 				subHash := fmt.Sprintf("%x", sha256.Sum256([]byte(sub)))
 				chunks = append(chunks, &Chunk{
-					ID:          fmt.Sprintf("%s::%s::%s", filename, section, hash[:8]),
+					ID:          fmt.Sprintf("%s::%s::%s", filename, section, subHash[:8]),
 					SourceFile:  filename,
 					Section:     section,
 					Content:     sub,

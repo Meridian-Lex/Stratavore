@@ -73,8 +73,8 @@ func (e *Embedder) Embed(ctx context.Context, text string) ([]float32, error) {
 		return nil, fmt.Errorf("parse embed response: %w", err)
 	}
 
-	if len(result.Embedding) == 0 {
-		return nil, fmt.Errorf("ollama returned empty embedding")
+	if len(result.Embedding) != VectorDimension {
+		return nil, fmt.Errorf("unexpected embedding dimension: got %d, want %d", len(result.Embedding), VectorDimension)
 	}
 
 	return result.Embedding, nil

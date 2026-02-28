@@ -17,8 +17,9 @@ type Service struct {
 	cache     *KnowledgeCache
 	indexer   *Indexer
 	knownDir  string
+	topK      int
 	logger    *zap.Logger
-	available bool // false if Ollama was unreachable at init
+	available bool // false if Qdrant was unreachable at init
 }
 
 // Config holds all configuration needed to construct a Service.
@@ -44,11 +45,17 @@ func NewService(cfg Config, logger *zap.Logger) (*Service, error) {
 	qdrantClient := NewQdrantClient(cfg.QdrantHost, cfg.QdrantPort, cfg.QdrantCollection)
 	cache := NewKnowledgeCache(cfg.RedisHost, cfg.RedisPort, cfg.CacheTTL)
 
+	topK := cfg.TopK
+	if topK <= 0 {
+		topK = DefaultTopK
+	}
+
 	svc := &Service{
 		embedder: embedder,
 		qdrant:   qdrantClient,
 		cache:    cache,
 		knownDir: cfg.KnowledgeDir,
+		topK:     topK,
 		logger:   logger,
 		available: true,
 	}
@@ -77,12 +84,13 @@ func NewService(cfg Config, logger *zap.Logger) (*Service, error) {
 		return svc, nil
 	}
 
-	// Check Ollama (degraded if unavailable)
+	// Check Ollama — indexer requires it, but Qdrant queries work without it
 	if err := embedder.Ping(pingCtx); err != nil {
 		logger.Warn("ollama unavailable — knowledge indexing disabled (queries will use existing index)",
 			zap.Error(err))
-		// Don't set available=false here: existing index can still be queried
-		// but we will not be able to index new content.
+		// Keep available=true: the existing Qdrant index is still queryable.
+		// The indexer is not created so no embedding attempts will be made.
+		return svc, nil
 	}
 
 	svc.indexer = NewIndexer(svc, logger)
@@ -112,7 +120,7 @@ func (s *Service) Start(ctx context.Context) {
 // Returns an empty result (not an error) if the service is in degraded mode.
 func (s *Service) Query(ctx context.Context, query string, k int) (*QueryResult, error) {
 	if k <= 0 {
-		k = DefaultTopK
+		k = s.topK
 	}
 
 	result := &QueryResult{Query: query, K: k}
@@ -135,7 +143,7 @@ func (s *Service) Query(ctx context.Context, query string, k int) (*QueryResult,
 	vector, err := s.embedder.Embed(ctx, query)
 	if err != nil {
 		s.logger.Warn("failed to embed query — returning empty results",
-			zap.String("query", query),
+			zap.Int("query_len", len(query)),
 			zap.Error(err))
 		return result, nil
 	}
