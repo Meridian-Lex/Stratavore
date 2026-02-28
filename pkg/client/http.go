@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/meridian-lex/stratavore/internal/knowledge"
 	"github.com/meridian-lex/stratavore/pkg/api"
 	"go.uber.org/zap"
 )
@@ -211,6 +212,18 @@ func (c *Client) post(ctx context.Context, path string, reqBody, respBody interf
 	}
 
 	return nil
+}
+
+// QueryKnowledge performs a semantic knowledge search against the daemon.
+// k=0 uses the server-side default (5).
+func (c *Client) QueryKnowledge(ctx context.Context, query string, k int) (*knowledge.QueryResult, error) {
+	url := fmt.Sprintf("%s/knowledge/query?q=%s", c.baseURL, query)
+	if k > 0 {
+		url = fmt.Sprintf("%s&k=%d", url, k)
+	}
+	var result knowledge.QueryResult
+	err := c.get(ctx, url, &result)
+	return &result, err
 }
 
 func (c *Client) get(ctx context.Context, url string, respBody interface{}) error {

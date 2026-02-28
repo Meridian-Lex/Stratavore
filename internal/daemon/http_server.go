@@ -12,6 +12,7 @@ import (
 	"github.com/meridian-lex/stratavore/internal/auth"
 	"github.com/meridian-lex/stratavore/internal/backends"
 	"github.com/meridian-lex/stratavore/internal/dispatch"
+	"github.com/meridian-lex/stratavore/internal/knowledge"
 	"github.com/meridian-lex/stratavore/internal/sprint"
 	"github.com/meridian-lex/stratavore/pkg/api"
 	"github.com/meridian-lex/stratavore/pkg/config"
@@ -28,6 +29,7 @@ type HTTPServer struct {
 	agentManager        *AgentManager
 	agentAdapter        *AgentAdapter
 	compatibilityStatus *CompatibilityStatusHandler
+	knowledgeSvc        *knowledge.Service // nil when knowledge is disabled
 	startedAt           time.Time
 }
 
@@ -39,6 +41,7 @@ type HTTPServerOptions struct {
 	SecurityCfg  *config.SecurityConfig
 	Fleet        *FleetHandler
 	AgentManager *AgentManager
+	KnowledgeSvc *knowledge.Service // optional; nil disables /api/v1/knowledge/*
 }
 
 // NewHTTPServer creates HTTP API server.
@@ -52,6 +55,7 @@ func NewHTTPServer(opts HTTPServerOptions) *HTTPServer {
 		logger:       opts.Logger,
 		fleet:        opts.Fleet,
 		agentManager: opts.AgentManager,
+		knowledgeSvc: opts.KnowledgeSvc,
 		startedAt:    time.Now(),
 	}
 
@@ -100,6 +104,9 @@ func NewHTTPServer(opts HTTPServerOptions) *HTTPServer {
 	mux.HandleFunc("/api/v1/sprints/status", httpServer.handleUpdateSprintStatus)
 	mux.HandleFunc("/api/v1/sprints/execute", httpServer.handleExecuteSprint)
 	mux.HandleFunc("/api/v1/tasks/result", httpServer.handleUpdateTaskResult)
+	// Knowledge retrieval (enabled only when KnowledgeSvc is configured)
+	mux.HandleFunc("/api/v1/knowledge/query", httpServer.handleKnowledgeQuery)
+
 	// Model registry
 	mux.HandleFunc("/api/v1/models", httpServer.handleListModels)
 	mux.HandleFunc("/api/v1/models/", httpServer.handleUpdateModel)
@@ -1209,4 +1216,46 @@ func (s *HTTPServer) handleCreateMission(w http.ResponseWriter, r *http.Request)
 	}
 
 	s.respondJSON(w, &api.CreateMissionResponse{Mission: mission})
+}
+
+// ===== Knowledge Retrieval =====
+
+// handleKnowledgeQuery handles GET /api/v1/knowledge/query?q=<text>&k=<n>
+// Returns the top-k semantically relevant knowledge chunks for the query.
+// Returns 503 when the knowledge service is not configured.
+func (s *HTTPServer) handleKnowledgeQuery(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.knowledgeSvc == nil {
+		http.Error(w, "knowledge service not enabled (set knowledge.enabled: true in config)", http.StatusServiceUnavailable)
+		return
+	}
+
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		http.Error(w, "q parameter required", http.StatusBadRequest)
+		return
+	}
+
+	k := 0
+	if kStr := r.URL.Query().Get("k"); kStr != "" {
+		parsed, err := strconv.Atoi(kStr)
+		if err != nil || parsed <= 0 {
+			http.Error(w, "k must be a positive integer", http.StatusBadRequest)
+			return
+		}
+		k = parsed
+	}
+
+	result, err := s.knowledgeSvc.Query(r.Context(), q, k)
+	if err != nil {
+		s.logger.Error("knowledge query failed", zap.String("query", q), zap.Error(err))
+		http.Error(w, "knowledge query failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.respondJSON(w, result)
 }

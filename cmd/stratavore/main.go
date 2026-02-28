@@ -85,6 +85,7 @@ func init() {
 	rootCmd.AddCommand(fleetCmd)
 	rootCmd.AddCommand(stateCmd)
 	rootCmd.AddCommand(completionCmd)
+	rootCmd.AddCommand(recallCmd)
 
 	// Register projects sub-commands
 	projectsCmd.AddCommand(projectsDeleteCmd)
@@ -1506,4 +1507,54 @@ func flagSummary(flags []string) string {
 		return "(none)"
 	}
 	return strings.Join(flags, " ")
+}
+
+// recallCmd queries the knowledge base for semantically relevant chunks.
+var recallCmd = &cobra.Command{
+	Use:   "recall <query>",
+	Short: "Query the knowledge base for relevant context",
+	Long: `Perform a semantic search of the indexed knowledge base and return
+the top matching chunks for the given query.
+
+The knowledge service must be enabled (knowledge.enabled: true in config)
+and the daemon must be running.
+
+Example:
+  stratavore recall "rank promotion rules"
+  stratavore recall "how does the outbox pattern work" --k 3`,
+	Args: cobra.MinimumNArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		k, _ := cmd.Flags().GetInt("k")
+		query := strings.Join(args, " ")
+
+		apiClient := getAPIClient()
+		ctx := context.Background()
+
+		if err := apiClient.Ping(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: Daemon not running. Start with: stratavored\n")
+			os.Exit(1)
+		}
+
+		result, err := apiClient.QueryKnowledge(ctx, query, k)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		if len(result.Chunks) == 0 {
+			fmt.Println("No matching knowledge found.")
+			return
+		}
+
+		fmt.Printf("Knowledge recall: %q  (k=%d, cached=%v)\n\n", query, result.K, result.Cached)
+		for i, c := range result.Chunks {
+			fmt.Printf("--- [%d] %s / %s  (score %.3f) ---\n", i+1, c.SourceFile, c.Section, c.Score)
+			fmt.Println(c.Content)
+			fmt.Println()
+		}
+	},
+}
+
+func init() {
+	recallCmd.Flags().IntP("k", "k", 5, "Number of results to return")
 }
