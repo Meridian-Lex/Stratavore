@@ -313,6 +313,9 @@ func bindEnvs(v *viper.Viper) {
 		"knowledge.ollama_model":       "STRATAVORE_KNOWLEDGE_OLLAMA_MODEL",
 		"knowledge.redis_host":         "STRATAVORE_KNOWLEDGE_REDIS_HOST",
 		"knowledge.redis_port":         "STRATAVORE_KNOWLEDGE_REDIS_PORT",
+		"knowledge.cache_ttl_seconds":  "STRATAVORE_KNOWLEDGE_CACHE_TTL_SECONDS",
+		"knowledge.top_k":              "STRATAVORE_KNOWLEDGE_TOP_K",
+		"knowledge.qdrant_collection":  "STRATAVORE_KNOWLEDGE_QDRANT_COLLECTION",
 	}
 	for key, env := range bindings {
 		_ = v.BindEnv(key, env)

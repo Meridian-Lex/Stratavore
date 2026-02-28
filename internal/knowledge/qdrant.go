@@ -218,7 +218,11 @@ func (q *QdrantClient) Search(ctx context.Context, vector []float32, k int) ([]*
 			c.ContentHash = v
 		}
 		if v, ok := r.Payload["updated_at"].(string); ok {
-			c.UpdatedAt, _ = time.Parse(time.RFC3339, v)
+			if t, err := time.Parse(time.RFC3339, v); err == nil {
+				c.UpdatedAt = t
+			} else {
+				c.UpdatedAt = time.Now().UTC()
+			}
 		}
 		chunks = append(chunks, c)
 	}
