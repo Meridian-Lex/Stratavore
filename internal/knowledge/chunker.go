@@ -60,9 +60,13 @@ func ChunkFile(path string) ([]*Chunk, error) {
 	}
 
 	scanner := bufio.NewScanner(f)
+	inCodeBlock := false
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.HasPrefix(line, "#") {
+		if strings.HasPrefix(line, "```") || strings.HasPrefix(line, "~~~") {
+			inCodeBlock = !inCodeBlock
+		}
+		if !inCodeBlock && strings.HasPrefix(line, "#") {
 			flush()
 			currentSection = strings.TrimSpace(strings.TrimLeft(line, "#"))
 			currentLines = []string{}

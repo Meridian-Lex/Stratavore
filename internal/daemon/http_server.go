@@ -104,8 +104,10 @@ func NewHTTPServer(opts HTTPServerOptions) *HTTPServer {
 	mux.HandleFunc("/api/v1/sprints/status", httpServer.handleUpdateSprintStatus)
 	mux.HandleFunc("/api/v1/sprints/execute", httpServer.handleExecuteSprint)
 	mux.HandleFunc("/api/v1/tasks/result", httpServer.handleUpdateTaskResult)
-	// Knowledge retrieval (enabled only when KnowledgeSvc is configured)
-	mux.HandleFunc("/api/v1/knowledge/query", httpServer.handleKnowledgeQuery)
+	// Knowledge retrieval (only registered when KnowledgeSvc is configured)
+	if opts.KnowledgeSvc != nil {
+		mux.HandleFunc("/api/v1/knowledge/query", httpServer.handleKnowledgeQuery)
+	}
 
 	// Model registry
 	mux.HandleFunc("/api/v1/models", httpServer.handleListModels)

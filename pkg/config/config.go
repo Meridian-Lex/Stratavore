@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/meridian-lex/stratavore/internal/knowledge"
 	"github.com/spf13/viper"
 )
 
@@ -266,11 +267,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("knowledge.knowledge_dir", filepath.Join(homeDir, "meridian-home", "lex-internal", "knowledge"))
 	v.SetDefault("knowledge.ollama_host", "http://localhost:11434")
 	v.SetDefault("knowledge.ollama_model", "granite-embedding:278m")
-	v.SetDefault("knowledge.qdrant_collection", "stratavore_knowledge")
+	v.SetDefault("knowledge.qdrant_collection", knowledge.QdrantCollection)
 	v.SetDefault("knowledge.redis_host", "localhost")
 	v.SetDefault("knowledge.redis_port", 6379)
-	v.SetDefault("knowledge.cache_ttl_seconds", 3600)
-	v.SetDefault("knowledge.top_k", 5)
+	v.SetDefault("knowledge.cache_ttl_seconds", knowledge.CacheTTLSeconds)
+	v.SetDefault("knowledge.top_k", knowledge.DefaultTopK)
 
 	// GitHub defaults
 	v.SetDefault("github.token", "")

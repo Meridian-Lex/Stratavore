@@ -86,6 +86,7 @@ func init() {
 	rootCmd.AddCommand(stateCmd)
 	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(recallCmd)
+	recallCmd.Flags().IntP("k", "k", 5, "Number of results to return")
 
 	// Register projects sub-commands
 	projectsCmd.AddCommand(projectsDeleteCmd)
@@ -1553,8 +1554,4 @@ Example:
 			fmt.Println()
 		}
 	},
-}
-
-func init() {
-	recallCmd.Flags().IntP("k", "k", 5, "Number of results to return")
 }

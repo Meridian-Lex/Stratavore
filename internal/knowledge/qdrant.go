@@ -44,6 +44,10 @@ func (q *QdrantClient) EnsureCollection(ctx context.Context) error {
 	if resp.StatusCode == http.StatusOK {
 		return nil // already exists
 	}
+	if resp.StatusCode != http.StatusNotFound {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("qdrant check collection returned %d: %s", resp.StatusCode, string(b))
+	}
 
 	// Create it.
 	payload := map[string]interface{}{
@@ -159,6 +163,9 @@ func (q *QdrantClient) DeleteBySourceFile(ctx context.Context, filename string) 
 
 // Search performs a KNN search and returns the top-k matching chunks.
 func (q *QdrantClient) Search(ctx context.Context, vector []float32, k int) ([]*Chunk, error) {
+	if len(vector) != VectorDimension {
+		return nil, fmt.Errorf("vector dimension mismatch: got %d, want %d", len(vector), VectorDimension)
+	}
 	payload := map[string]interface{}{
 		"vector":       vector,
 		"limit":        k,

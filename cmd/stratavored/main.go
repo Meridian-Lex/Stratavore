@@ -173,7 +173,14 @@ func run() error {
 			logger.Warn("knowledge service failed to initialise — continuing without it", zap.Error(err))
 		} else {
 			knowledgeSvc = svc
-			go svc.Start(ctx)
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Error("knowledge service panicked", zap.Any("panic", r))
+					}
+				}()
+				svc.Start(ctx)
+			}()
 			logger.Info("knowledge service started")
 		}
 	} else {

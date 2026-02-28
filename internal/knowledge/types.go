@@ -1,6 +1,6 @@
 package knowledge
 
-import "time"
+import "github.com/meridian-lex/stratavore/pkg/api"
 
 const (
 	// QdrantCollection is the Qdrant collection name for knowledge chunks.
@@ -15,21 +15,7 @@ const (
 	CacheKeyPrefix = "stratavore:knowledge:q:"
 )
 
-// Chunk is a single indexed unit of knowledge — a section of a markdown file.
-type Chunk struct {
-	ID          string    `json:"id"`
-	SourceFile  string    `json:"source_file"`
-	Section     string    `json:"section"`
-	Content     string    `json:"content"`
-	ContentHash string    `json:"content_hash"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	Score       float32   `json:"score,omitempty"`
-}
-
-// QueryResult holds the response to a knowledge query.
-type QueryResult struct {
-	Chunks []*Chunk `json:"chunks"`
-	Query  string   `json:"query"`
-	K      int      `json:"k"`
-	Cached bool     `json:"cached"`
-}
+// Chunk and QueryResult are type aliases for the public API types so
+// consumers of pkg/client do not need to import internal/knowledge.
+type Chunk = api.KnowledgeChunk
+type QueryResult = api.KnowledgeQueryResult
