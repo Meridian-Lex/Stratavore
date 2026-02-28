@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,27 +25,39 @@ type HTTPServer struct {
 	handler             *GRPCServer // Reuse gRPC handler logic
 	logger              *zap.Logger
 	fleet               *FleetHandler
+	agentManager        *AgentManager
 	agentAdapter        *AgentAdapter
 	compatibilityStatus *CompatibilityStatusHandler
 	startedAt           time.Time
 }
 
+// HTTPServerOptions configures HTTPServer creation
+type HTTPServerOptions struct {
+	Port         int
+	Handler      *GRPCServer
+	Logger       *zap.Logger
+	SecurityCfg  *config.SecurityConfig
+	Fleet        *FleetHandler
+	AgentManager *AgentManager
+}
+
 // NewHTTPServer creates HTTP API server.
 // It wires JWT auth and per-client rate limiting when the corresponding
 // config values are set; both default to disabled/permissive.
-func NewHTTPServer(port int, handler *GRPCServer, logger *zap.Logger, cfg *config.SecurityConfig, fleet *FleetHandler) *HTTPServer {
+func NewHTTPServer(opts HTTPServerOptions) *HTTPServer {
 	mux := http.NewServeMux()
 
 	httpServer := &HTTPServer{
-		handler:   handler,
-		logger:    logger,
-		fleet:     fleet,
-		startedAt: time.Now(),
+		handler:      opts.Handler,
+		logger:       opts.Logger,
+		fleet:        opts.Fleet,
+		agentManager: opts.AgentManager,
+		startedAt:    time.Now(),
 	}
 
 	// Initialize WebUI compatibility adapters
-	httpServer.agentAdapter = NewAgentAdapter(handler, logger)
-	httpServer.compatibilityStatus = NewCompatibilityStatusHandler(handler, httpServer.agentAdapter, logger)
+	httpServer.agentAdapter = NewAgentAdapter(opts.Handler, opts.Logger)
+	httpServer.compatibilityStatus = NewCompatibilityStatusHandler(opts.Handler, httpServer.agentAdapter, opts.Logger)
 
 	// Register routes (v1 API)
 	mux.HandleFunc("/api/v1/runners/launch", httpServer.handleLaunchRunner)
@@ -68,6 +81,16 @@ func NewHTTPServer(port int, handler *GRPCServer, logger *zap.Logger, cfg *confi
 	mux.HandleFunc("/api/v1/config", httpServer.handleGetConfig)
 	mux.HandleFunc("/api/v1/tokens", httpServer.handleTokens)
 	mux.HandleFunc("/api/v1/state", httpServer.handleGetState)
+
+	// Agent personality system
+	mux.HandleFunc("/api/v1/agents/register", httpServer.handleRegisterAgent)
+	mux.HandleFunc("/api/v1/agents/list", httpServer.handleListAgents)
+	mux.HandleFunc("/api/v1/agents/get", httpServer.handleGetAgent)
+	mux.HandleFunc("/api/v1/agents/update", httpServer.handleUpdateAgent)
+	mux.HandleFunc("/api/v1/agents/commend", httpServer.handleCommendAgent)
+	mux.HandleFunc("/api/v1/agents/strike", httpServer.handleStrikeAgent)
+	mux.HandleFunc("/api/v1/agents/missions/list", httpServer.handleListAgentMissions)
+	mux.HandleFunc("/api/v1/agents/missions/create", httpServer.handleCreateMission)
 
 	// Sprint management
 	mux.HandleFunc("/api/v1/sprints/create", httpServer.handleCreateSprint)
@@ -99,34 +122,34 @@ func NewHTTPServer(port int, handler *GRPCServer, logger *zap.Logger, cfg *confi
 	var handler_ http.Handler = mux
 
 	// JWT auth (disabled when auth_secret is empty)
-	if cfg != nil {
-		validator := auth.NewValidator(cfg.AuthSecret)
+	if opts.SecurityCfg != nil {
+		validator := auth.NewValidator(opts.SecurityCfg.AuthSecret)
 		if validator.Enabled() {
-			logger.Info("HTTP API auth enabled")
+			opts.Logger.Info("HTTP API auth enabled")
 		} else {
-			logger.Info("HTTP API auth disabled (no auth_secret configured)")
+			opts.Logger.Info("HTTP API auth disabled (no auth_secret configured)")
 		}
 		handler_ = auth.Middleware(validator)(handler_)
 
 		// Rate limiting (always active; defaults to 300 req/min, burst 50)
-		ratePerMin := cfg.RateLimit.RequestsPerMinute
+		ratePerMin := opts.SecurityCfg.RateLimit.RequestsPerMinute
 		if ratePerMin <= 0 {
 			ratePerMin = 300
 		}
-		burst := cfg.RateLimit.Burst
+		burst := opts.SecurityCfg.RateLimit.Burst
 		if burst <= 0 {
 			burst = 50
 		}
 		rl := auth.NewRateLimiter(ratePerMin, time.Minute, burst)
 		handler_ = auth.RateLimitMiddleware(rl)(handler_)
 
-		logger.Info("HTTP API rate limiting enabled",
+		opts.Logger.Info("HTTP API rate limiting enabled",
 			zap.Int("requests_per_minute", ratePerMin),
 			zap.Int("burst", burst))
 	}
 
 	httpServer.server = &http.Server{
-		Addr:         fmt.Sprintf(":%d", port),
+		Addr:         fmt.Sprintf(":%d", opts.Port),
 		Handler:      handler_,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
@@ -928,4 +951,262 @@ func (s *HTTPServer) handleExecuteSprint(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(exec)
+}
+
+// ===== Agent Personality System Handlers =====
+
+// handleRegisterAgent handles POST /api/v1/agents/register to register a new agent personality
+func (s *HTTPServer) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.agentManager == nil {
+		http.Error(w, "agent manager not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req api.RegisterAgentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	agent, err := s.agentManager.RegisterAgent(r.Context(), &req)
+	if err != nil {
+		s.respondJSON(w, &api.RegisterAgentResponse{Error: err.Error()})
+		return
+	}
+
+	s.respondJSON(w, &api.RegisterAgentResponse{Agent: agent})
+}
+
+// handleListAgents handles GET /api/v1/agents/list to retrieve paginated list of agents
+func (s *HTTPServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.agentManager == nil {
+		http.Error(w, "agent manager not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Parse query parameters
+	limit := int32(50)
+	offset := int32(0)
+
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if l, err := strconv.ParseInt(limitStr, 10, 32); err == nil && l > 0 && l <= 100 {
+			limit = int32(l)
+		}
+	}
+
+	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
+		if o, err := strconv.ParseInt(offsetStr, 10, 32); err == nil && o >= 0 {
+			offset = int32(o)
+		}
+	}
+
+	agents, total, err := s.agentManager.ListAgents(r.Context(), limit, offset)
+	if err != nil {
+		s.respondJSON(w, &api.ListAgentsResponse{Error: err.Error()})
+		return
+	}
+
+	s.respondJSON(w, &api.ListAgentsResponse{
+		Agents: agents,
+		Total:  total,
+	})
+}
+
+// handleGetAgent handles GET /api/v1/agents/get to retrieve a single agent by ID
+func (s *HTTPServer) handleGetAgent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.agentManager == nil {
+		http.Error(w, "agent manager not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	agentID := r.URL.Query().Get("agent_id")
+	if agentID == "" {
+		s.respondJSON(w, &api.GetAgentResponse{Error: "agent_id required"})
+		return
+	}
+
+	agent, err := s.agentManager.GetAgent(r.Context(), agentID)
+	if err != nil {
+		s.respondJSON(w, &api.GetAgentResponse{Error: err.Error()})
+		return
+	}
+
+	s.respondJSON(w, &api.GetAgentResponse{Agent: agent})
+}
+
+// handleUpdateAgent handles POST/PATCH /api/v1/agents/update to update agent personality traits or specialization
+func (s *HTTPServer) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodPatch {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.agentManager == nil {
+		http.Error(w, "agent manager not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req api.UpdateAgentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	agent, err := s.agentManager.UpdateAgent(r.Context(), &req)
+	if err != nil {
+		s.respondJSON(w, &api.UpdateAgentResponse{Error: err.Error()})
+		return
+	}
+
+	s.respondJSON(w, &api.UpdateAgentResponse{Agent: agent})
+}
+
+// handleCommendAgent handles POST /api/v1/agents/commend to award commendation points and check for promotion
+func (s *HTTPServer) handleCommendAgent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.agentManager == nil {
+		http.Error(w, "agent manager not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req api.CommendAgentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	promoted, newRank, err := s.agentManager.CommendAgent(r.Context(), &req)
+	if err != nil {
+		s.respondJSON(w, &api.CommendAgentResponse{Error: err.Error()})
+		return
+	}
+
+	s.respondJSON(w, &api.CommendAgentResponse{
+		Success:  true,
+		Promoted: promoted,
+		NewRank:  newRank,
+	})
+}
+
+// handleStrikeAgent handles POST /api/v1/agents/strike to issue strikes and check for demotion
+func (s *HTTPServer) handleStrikeAgent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.agentManager == nil {
+		http.Error(w, "agent manager not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req api.StrikeAgentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	demoted, newRank, err := s.agentManager.StrikeAgent(r.Context(), &req)
+	if err != nil {
+		s.respondJSON(w, &api.StrikeAgentResponse{Error: err.Error()})
+		return
+	}
+
+	s.respondJSON(w, &api.StrikeAgentResponse{
+		Success: true,
+		Demoted: demoted,
+		NewRank: newRank,
+	})
+}
+
+// handleListAgentMissions handles GET /api/v1/agents/missions/list to retrieve mission history for an agent
+func (s *HTTPServer) handleListAgentMissions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.agentManager == nil {
+		http.Error(w, "agent manager not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	agentID := r.URL.Query().Get("agent_id")
+	if agentID == "" {
+		s.respondJSON(w, &api.ListAgentMissionsResponse{Error: "agent_id required"})
+		return
+	}
+
+	// Parse pagination parameters
+	limit := int32(50)
+	offset := int32(0)
+
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if l, err := strconv.ParseInt(limitStr, 10, 32); err == nil && l > 0 && l <= 100 {
+			limit = int32(l)
+		}
+	}
+
+	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
+		if o, err := strconv.ParseInt(offsetStr, 10, 32); err == nil && o >= 0 {
+			offset = int32(o)
+		}
+	}
+
+	missions, total, err := s.agentManager.ListAgentMissions(r.Context(), agentID, limit, offset)
+	if err != nil {
+		s.respondJSON(w, &api.ListAgentMissionsResponse{Error: err.Error()})
+		return
+	}
+
+	s.respondJSON(w, &api.ListAgentMissionsResponse{
+		Missions: missions,
+		Total:    total,
+	})
+}
+
+// handleCreateMission handles POST /api/v1/agents/missions/create to record a new mission for an agent
+func (s *HTTPServer) handleCreateMission(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.agentManager == nil {
+		http.Error(w, "agent manager not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req api.CreateMissionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	mission, err := s.agentManager.CreateMission(r.Context(), &req)
+	if err != nil {
+		s.respondJSON(w, &api.CreateMissionResponse{Error: err.Error()})
+		return
+	}
+
+	s.respondJSON(w, &api.CreateMissionResponse{Mission: mission})
 }

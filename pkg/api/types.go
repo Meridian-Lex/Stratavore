@@ -343,3 +343,155 @@ type UpdateModelRequest struct {
 	Enabled *bool                  `json:"enabled,omitempty"`
 	Config  map[string]interface{} `json:"config,omitempty"`
 }
+
+// ===== Agent Personality System =====
+
+type AgentPersonality struct {
+	ID                 string                 `json:"id"`
+	AgentName          string                 `json:"agentName"`
+	Specialization     string                 `json:"specialization,omitempty"`
+	PersonalityTraits  map[string]interface{} `json:"personalityTraits,omitempty"`
+	CurrentRank        int                    `json:"currentRank"`
+	RankProgress       int                    `json:"rankProgress"`
+	Strikes            int                    `json:"strikes"`
+	TotalMissions      int                    `json:"totalMissions"`
+	SuccessfulMissions int                    `json:"successfulMissions"`
+	FailedMissions     int                    `json:"failedMissions"`
+	TotalTokensUsed    int64                  `json:"totalTokensUsed"`
+	TotalRuntimeHours  float64                `json:"totalRuntimeHours"`
+	CreatedAt          string                 `json:"createdAt"`
+	LastActiveAt       string                 `json:"lastActiveAt,omitempty"`
+	UpdatedAt          string                 `json:"updatedAt"`
+}
+
+type AgentMission struct {
+	ID                 string  `json:"id"`
+	AgentID            string  `json:"agentId"`
+	MissionType        string  `json:"missionType"`
+	MissionName        string  `json:"missionName"`
+	MissionDescription string  `json:"missionDescription,omitempty"`
+	ProjectName        string  `json:"projectName,omitempty"`
+	RunnerID           string  `json:"runnerId,omitempty"`
+	SessionID          string  `json:"sessionId,omitempty"`
+	Status             string  `json:"status"`
+	ResultSummary      string  `json:"resultSummary,omitempty"`
+	TokensUsed         int64   `json:"tokensUsed"`
+	RuntimeHours       float64 `json:"runtimeHours"`
+	StartedAt          string  `json:"startedAt"`
+	CompletedAt        string  `json:"completedAt,omitempty"`
+	CreatedAt          string  `json:"createdAt"`
+}
+
+type AgentRankEvent struct {
+	ID            string `json:"id"`
+	AgentID       string `json:"agentId"`
+	EventType     string `json:"eventType"`
+	RankBefore    *int   `json:"rankBefore,omitempty"`
+	RankAfter     *int   `json:"rankAfter,omitempty"`
+	PointsAwarded int    `json:"pointsAwarded"`
+	Achievement   string `json:"achievement,omitempty"`
+	Infraction    string `json:"infraction,omitempty"`
+	AwardedBy     string `json:"awardedBy,omitempty"`
+	MissionID     string `json:"missionId,omitempty"`
+	RelatedPR     string `json:"relatedPr,omitempty"`
+	CreatedAt     string `json:"createdAt"`
+}
+
+// Agent API Requests
+
+type RegisterAgentRequest struct {
+	AgentName         string                 `json:"agentName"`
+	PersonalityTraits map[string]interface{} `json:"personalityTraits,omitempty"`
+}
+
+type RegisterAgentResponse struct {
+	Agent *AgentPersonality `json:"agent"`
+	Error string            `json:"error,omitempty"`
+}
+
+type ListAgentsRequest struct {
+	Limit  int32 `json:"limit,omitempty"`
+	Offset int32 `json:"offset,omitempty"`
+}
+
+type ListAgentsResponse struct {
+	Agents []*AgentPersonality `json:"agents"`
+	Total  int32               `json:"total"`
+	Error  string              `json:"error,omitempty"`
+}
+
+type GetAgentRequest struct {
+	AgentID string `json:"agentId"`
+}
+
+type GetAgentResponse struct {
+	Agent *AgentPersonality `json:"agent"`
+	Error string            `json:"error,omitempty"`
+}
+
+type UpdateAgentRequest struct {
+	AgentID           string                 `json:"agentId"`
+	PersonalityTraits map[string]interface{} `json:"personalityTraits,omitempty"`
+	Specialization    *string                `json:"specialization,omitempty"`
+}
+
+type UpdateAgentResponse struct {
+	Agent *AgentPersonality `json:"agent"`
+	Error string            `json:"error,omitempty"`
+}
+
+type CommendAgentRequest struct {
+	AgentID     string `json:"agentId"`
+	Achievement string `json:"achievement"`
+	Points      int    `json:"points"`
+	AwardedBy   string `json:"awardedBy,omitempty"`
+	MissionID   string `json:"missionId,omitempty"`
+	RelatedPR   string `json:"relatedPr,omitempty"`
+}
+
+type CommendAgentResponse struct {
+	Success  bool   `json:"success"`
+	Promoted bool   `json:"promoted,omitempty"`
+	NewRank  int    `json:"newRank,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+type StrikeAgentRequest struct {
+	AgentID    string `json:"agentId"`
+	Infraction string `json:"infraction"`
+	MissionID  string `json:"missionId,omitempty"`
+}
+
+type StrikeAgentResponse struct {
+	Success bool   `json:"success"`
+	Demoted bool   `json:"demoted,omitempty"`
+	NewRank int    `json:"newRank,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+type ListAgentMissionsRequest struct {
+	AgentID string `json:"agentId"`
+	Limit   int32  `json:"limit,omitempty"`
+	Offset  int32  `json:"offset,omitempty"`
+}
+
+type ListAgentMissionsResponse struct {
+	Missions []*AgentMission `json:"missions"`
+	Total    int32           `json:"total"`
+	Error    string          `json:"error,omitempty"`
+}
+
+type CreateMissionRequest struct {
+	AgentID            string `json:"agentId"`
+	MissionType        string `json:"missionType"`
+	MissionName        string `json:"missionName"`
+	MissionDescription string `json:"missionDescription,omitempty"`
+	ProjectName        string `json:"projectName,omitempty"`
+	RunnerID           string `json:"runnerId,omitempty"`
+	SessionID          string `json:"sessionId,omitempty"`
+}
+
+type CreateMissionResponse struct {
+	Mission *AgentMission `json:"mission"`
+	Error   string        `json:"error,omitempty"`
+}
