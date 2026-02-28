@@ -13,8 +13,6 @@ const (
 	CacheTTLSeconds = 3600
 	// CacheKeyPrefix prefixes all knowledge query cache keys.
 	CacheKeyPrefix = "stratavore:knowledge:q:"
-	// IndexKeyPrefix prefixes per-file Qdrant point ID lists.
-	IndexKeyPrefix = "stratavore:knowledge:idx:"
 )
 
 // Chunk is a single indexed unit of knowledge — a section of a markdown file.

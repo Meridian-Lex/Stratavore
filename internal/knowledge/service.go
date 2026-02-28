@@ -190,8 +190,8 @@ func (s *Service) IndexFile(ctx context.Context, path string) error {
 			zap.String("file", filename), zap.Error(err))
 	}
 	// Invalidate cache entries for this file
-	if err := s.cache.InvalidateFile(ctx, filename); err != nil {
-		s.logger.Warn("failed to invalidate cache for file",
+	if err := s.cache.InvalidateFile(ctx); err != nil {
+		s.logger.Warn("failed to invalidate query cache after re-index",
 			zap.String("file", filename), zap.Error(err))
 	}
 
