@@ -272,6 +272,13 @@ func run() error {
 		metricsServer.Stop()
 	}
 
+	// Close knowledge service (releases Redis connection etc.)
+	if knowledgeSvc != nil {
+		if err := knowledgeSvc.Close(); err != nil {
+			logger.Warn("error closing knowledge service", zap.Error(err))
+		}
+	}
+
 	// Stop outbox publisher
 	outboxPublisher.Stop()
 

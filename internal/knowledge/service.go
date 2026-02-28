@@ -216,6 +216,17 @@ func (s *Service) IndexFile(ctx context.Context, path string) error {
 	return nil
 }
 
+// Close releases resources held by the service (Redis client, etc.).
+// Should be called during daemon shutdown after the context is cancelled.
+func (s *Service) Close() error {
+	if s.cache != nil {
+		if err := s.cache.Close(); err != nil {
+			s.logger.Warn("failed to close knowledge cache", zap.Error(err))
+		}
+	}
+	return nil
+}
+
 // KnowledgeDir returns the monitored directory path.
 func (s *Service) KnowledgeDir() string {
 	return s.knownDir

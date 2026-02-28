@@ -25,7 +25,14 @@ func NewQdrantClient(host string, port int, collection string) *QdrantClient {
 	return &QdrantClient{
 		baseURL:    fmt.Sprintf("http://%s:%d", host, port),
 		collection: collection,
-		client:     &http.Client{Timeout: 15 * time.Second},
+		client: &http.Client{
+			Timeout: 15 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        10,
+				MaxIdleConnsPerHost: 5,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
 	}
 }
 

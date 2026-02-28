@@ -98,8 +98,10 @@ func (idx *Indexer) runWatcher(ctx context.Context, dir string) error {
 	idx.logger.Info("knowledge watcher started", zap.String("dir", dir))
 
 	// Debounce: collect events and process after a short quiet period.
+	// The select loop serializes access to pending, so no mutex is needed.
 	pending := make(map[string]struct{})
 	debounce := time.NewTimer(0)
+	defer debounce.Stop()
 	<-debounce.C // drain initial fire
 
 	for {
