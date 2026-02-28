@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/meridian-lex/stratavore/internal/daemon"
+	"github.com/meridian-lex/stratavore/internal/knowledge"
 	"github.com/meridian-lex/stratavore/internal/messaging"
 	"github.com/meridian-lex/stratavore/internal/notifications"
 	"github.com/meridian-lex/stratavore/internal/observability"
@@ -149,6 +150,43 @@ func run() error {
 	// Create agent manager
 	agentManager := daemon.NewAgentManager(db, logger)
 
+	// Start knowledge service (optional, feature-flagged)
+	var knowledgeSvc *knowledge.Service
+	if cfg.Knowledge.Enabled {
+		logger.Info("starting knowledge service",
+			zap.String("dir", cfg.Knowledge.KnowledgeDir),
+			zap.String("ollama_host", cfg.Knowledge.OllamaHost))
+		svc, err := knowledge.NewService(knowledge.Config{
+			Enabled:          cfg.Knowledge.Enabled,
+			KnowledgeDir:     cfg.Knowledge.KnowledgeDir,
+			OllamaHost:       cfg.Knowledge.OllamaHost,
+			OllamaModel:      cfg.Knowledge.OllamaModel,
+			QdrantHost:       cfg.Docker.Qdrant.Host,
+			QdrantPort:       cfg.Docker.Qdrant.Port,
+			QdrantCollection: cfg.Knowledge.QdrantCollection,
+			RedisHost:        cfg.Knowledge.RedisHost,
+			RedisPort:        cfg.Knowledge.RedisPort,
+			CacheTTL:         cfg.Knowledge.CacheTTLSeconds,
+			TopK:             cfg.Knowledge.TopK,
+		}, logger)
+		if err != nil {
+			logger.Warn("knowledge service failed to initialise — continuing without it", zap.Error(err))
+		} else {
+			knowledgeSvc = svc
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Error("knowledge service panicked", zap.Any("panic", r))
+					}
+				}()
+				svc.Start(ctx)
+			}()
+			logger.Info("knowledge service started")
+		}
+	} else {
+		logger.Info("knowledge service disabled (set knowledge.enabled: true to enable)")
+	}
+
 	// Start HTTP API server
 	httpServer := daemon.NewHTTPServer(daemon.HTTPServerOptions{
 		Port:         cfg.Daemon.Port_HTTP,
@@ -157,6 +195,7 @@ func run() error {
 		SecurityCfg:  &cfg.Security,
 		Fleet:        fleetHandler,
 		AgentManager: agentManager,
+		KnowledgeSvc: knowledgeSvc,
 	})
 	go func() {
 		if err := httpServer.Start(); err != nil {
@@ -231,6 +270,13 @@ func run() error {
 	// Stop metrics server
 	if metricsServer != nil {
 		metricsServer.Stop()
+	}
+
+	// Close knowledge service (releases Redis connection etc.)
+	if knowledgeSvc != nil {
+		if err := knowledgeSvc.Close(); err != nil {
+			logger.Warn("error closing knowledge service", zap.Error(err))
+		}
 	}
 
 	// Stop outbox publisher

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/meridian-lex/stratavore/internal/knowledge"
 	"github.com/spf13/viper"
 )
 
@@ -16,6 +17,20 @@ type Config struct {
 	Observability ObservabilityConfig `mapstructure:"observability"`
 	Security      SecurityConfig      `mapstructure:"security"`
 	GitHub        GitHubConfig        `mapstructure:"github"`
+	Knowledge     KnowledgeConfig     `mapstructure:"knowledge"`
+}
+
+// KnowledgeConfig controls the semantic knowledge indexing and retrieval system.
+type KnowledgeConfig struct {
+	Enabled          bool   `mapstructure:"enabled"`
+	KnowledgeDir     string `mapstructure:"knowledge_dir"`
+	OllamaHost       string `mapstructure:"ollama_host"`
+	OllamaModel      string `mapstructure:"ollama_model"`
+	QdrantCollection string `mapstructure:"qdrant_collection"`
+	RedisHost        string `mapstructure:"redis_host"`
+	RedisPort        int    `mapstructure:"redis_port"`
+	CacheTTLSeconds  int    `mapstructure:"cache_ttl_seconds"`
+	TopK             int    `mapstructure:"top_k"`
 }
 
 // DatabaseConfig holds database connection settings
@@ -247,6 +262,17 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("security.rate_limit.requests_per_minute", 300)
 	v.SetDefault("security.rate_limit.burst", 50)
 
+	// Knowledge defaults
+	v.SetDefault("knowledge.enabled", false)
+	v.SetDefault("knowledge.knowledge_dir", filepath.Join(homeDir, "meridian-home", "lex-internal", "knowledge"))
+	v.SetDefault("knowledge.ollama_host", "http://localhost:11434")
+	v.SetDefault("knowledge.ollama_model", "granite-embedding:278m")
+	v.SetDefault("knowledge.qdrant_collection", knowledge.QdrantCollection)
+	v.SetDefault("knowledge.redis_host", "localhost")
+	v.SetDefault("knowledge.redis_port", 6379)
+	v.SetDefault("knowledge.cache_ttl_seconds", knowledge.CacheTTLSeconds)
+	v.SetDefault("knowledge.top_k", knowledge.DefaultTopK)
+
 	// GitHub defaults
 	v.SetDefault("github.token", "")
 	v.SetDefault("github.fleet_repos", []string{
@@ -282,6 +308,15 @@ func bindEnvs(v *viper.Viper) {
 		"daemon.grpc_port":             "STRATAVORE_DAEMON_GRPC_PORT",
 		"daemon.http_port":             "STRATAVORE_DAEMON_HTTP_PORT",
 		"security.auth_secret":         "STRATAVORE_SECURITY_AUTH_SECRET",
+		"knowledge.enabled":            "STRATAVORE_KNOWLEDGE_ENABLED",
+		"knowledge.knowledge_dir":      "STRATAVORE_KNOWLEDGE_DIR",
+		"knowledge.ollama_host":        "STRATAVORE_KNOWLEDGE_OLLAMA_HOST",
+		"knowledge.ollama_model":       "STRATAVORE_KNOWLEDGE_OLLAMA_MODEL",
+		"knowledge.redis_host":         "STRATAVORE_KNOWLEDGE_REDIS_HOST",
+		"knowledge.redis_port":         "STRATAVORE_KNOWLEDGE_REDIS_PORT",
+		"knowledge.cache_ttl_seconds":  "STRATAVORE_KNOWLEDGE_CACHE_TTL_SECONDS",
+		"knowledge.top_k":              "STRATAVORE_KNOWLEDGE_TOP_K",
+		"knowledge.qdrant_collection":  "STRATAVORE_KNOWLEDGE_QDRANT_COLLECTION",
 	}
 	for key, env := range bindings {
 		_ = v.BindEnv(key, env)

@@ -495,3 +495,24 @@ type CreateMissionResponse struct {
 	Mission *AgentMission `json:"mission"`
 	Error   string        `json:"error,omitempty"`
 }
+
+// KnowledgeChunk is a single indexed unit of knowledge returned by the
+// knowledge retrieval API. Defined here so pkg/client consumers do not
+// need to import the internal/knowledge package.
+type KnowledgeChunk struct {
+	ID          string    `json:"id"`
+	SourceFile  string    `json:"source_file"`
+	Section     string    `json:"section"`
+	Content     string    `json:"content"`
+	ContentHash string    `json:"content_hash"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	Score       float32   `json:"score,omitempty"`
+}
+
+// KnowledgeQueryResult holds the response to a knowledge query.
+type KnowledgeQueryResult struct {
+	Chunks []*KnowledgeChunk `json:"chunks"`
+	Query  string            `json:"query"`
+	K      int               `json:"k"`
+	Cached bool              `json:"cached"`
+}
