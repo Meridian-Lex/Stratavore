@@ -206,10 +206,11 @@ jobs:
           gh label create "automated" --description "Automated PR" --color "0e8a16" --force || true
 
       - name: Create pull request
-        # ISSUE #10: Permissions validation - uses GITHUB_TOKEN in GH_TOKEN env var
+        # Use LEXCODE_TOKEN instead of GITHUB_TOKEN to allow PR to trigger workflows
+        # PRs created with GITHUB_TOKEN don't trigger other workflows (GitHub security feature)
         id: create_pr
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.LEXCODE_TOKEN }}
         run: |
           # ISSUE #11: Explicit error handling for PR creation
           # Build PR body in file to avoid YAML syntax issues with embedded colons
