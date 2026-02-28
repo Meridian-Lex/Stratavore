@@ -237,7 +237,7 @@ func (q *QdrantClient) Search(ctx context.Context, vector []float32, k int) ([]*
 	return chunks, nil
 }
 
-// Ping checks if Qdrant is reachable.
+// Ping checks if Qdrant is reachable and healthy.
 func (q *QdrantClient) Ping(ctx context.Context) error {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, q.baseURL+"/", nil)
 	resp, err := q.client.Do(req)
@@ -245,5 +245,9 @@ func (q *QdrantClient) Ping(ctx context.Context) error {
 		return fmt.Errorf("qdrant unreachable at %s: %w", q.baseURL, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("qdrant health check returned %d: %s", resp.StatusCode, string(b))
+	}
 	return nil
 }
