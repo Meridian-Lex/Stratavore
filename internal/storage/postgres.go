@@ -1507,6 +1507,9 @@ func (c *PostgresClient) ListAgents(ctx context.Context, limit, offset int32) ([
 	if limit <= 0 {
 		limit = 50
 	}
+	if offset < 0 {
+		offset = 0
+	}
 
 	// Get total count
 	var total int32
@@ -1580,6 +1583,10 @@ func (c *PostgresClient) ListAgents(ctx context.Context, limit, offset int32) ([
 		}
 
 		agents = append(agents, agent)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("failed to iterate agents: %w", err)
 	}
 
 	return agents, total, nil
