@@ -212,6 +212,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.LEXCODE_TOKEN }}
         run: |
+          # Fail fast if LEXCODE_TOKEN is not configured
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::LEXCODE_TOKEN is not configured; cannot create PR"
+            echo "Please configure LEXCODE_TOKEN secret in repository settings"
+            exit 1
+          fi
+
           # ISSUE #11: Explicit error handling for PR creation
           # Build PR body in file to avoid YAML syntax issues with embedded colons
           BUMP_TYPE="${{ steps.bump_type.outputs.type }}"
