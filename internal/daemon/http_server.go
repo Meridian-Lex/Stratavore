@@ -989,7 +989,7 @@ func (s *HTTPServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	offset := int32(0)
 
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
-		if l, err := strconv.ParseInt(limitStr, 10, 32); err == nil && l > 0 {
+		if l, err := strconv.ParseInt(limitStr, 10, 32); err == nil && l > 0 && l <= 100 {
 			limit = int32(l)
 		}
 	}
@@ -1146,7 +1146,23 @@ func (s *HTTPServer) handleListAgentMissions(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	missions, total, err := s.agentManager.ListAgentMissions(r.Context(), agentID, 50, 0)
+	// Parse pagination parameters
+	limit := int32(50)
+	offset := int32(0)
+
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if l, err := strconv.ParseInt(limitStr, 10, 32); err == nil && l > 0 && l <= 100 {
+			limit = int32(l)
+		}
+	}
+
+	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
+		if o, err := strconv.ParseInt(offsetStr, 10, 32); err == nil && o >= 0 {
+			offset = int32(o)
+		}
+	}
+
+	missions, total, err := s.agentManager.ListAgentMissions(r.Context(), agentID, limit, offset)
 	if err != nil {
 		s.respondJSON(w, &api.ListAgentMissionsResponse{Error: err.Error()})
 		return
