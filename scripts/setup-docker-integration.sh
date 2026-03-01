@@ -67,14 +67,14 @@ mkdir -p ~/.local/share/stratavore
 
 # Create default config if it doesn't exist
 if [ ! -f ~/.config/stratavore/stratavore.yaml ]; then
-    cat > ~/.config/stratavore/stratavore.yaml <<EOF
+    cat > ~/.config/stratavore/stratavore.yaml <<'EOF'
 database:
   postgresql:
     host: localhost
     port: 5432
     database: stratavore_state
     user: stratavore
-    password: "${STRATAVORE_DB_PASSWORD}"
+    password: ""  # Set via env: STRATAVORE_DATABASE_POSTGRESQL_PASSWORD
     sslmode: disable
     max_conns: 25
     min_conns: 5
@@ -119,7 +119,7 @@ echo "[OK] Docker integration complete!"
 echo "================================"
 echo ""
 echo "Connection details:"
-echo " PostgreSQL: postgresql://stratavore:${STRATAVORE_DB_PASSWORD}@localhost:5432/stratavore_state"
+echo " PostgreSQL: postgresql://stratavore:<redacted>@localhost:5432/stratavore_state"
 echo " RabbitMQ: amqp://guest:guest@localhost:5672/"
 echo " ntfy: http://localhost:2586"
 echo ""
