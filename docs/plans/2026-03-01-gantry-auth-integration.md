@@ -60,7 +60,11 @@ No action needed — secrets.yaml is a system file, not tracked in any repo.
 
 ```bash
 STRAT_PW=$(python3 -c "import yaml; print(yaml.safe_load(open('/home/meridian/.config/secrets.yaml'))['postgres']['stratavore_db_password'])")
-echo "STRATAVORE_DB_PASSWORD=${STRAT_PW}" >> ~/meridian-home/projects/Gantry/docker-secrets.env
+if grep -q '^STRATAVORE_DB_PASSWORD=' ~/meridian-home/projects/Gantry/docker-secrets.env; then
+  sed -i.bak "s|^STRATAVORE_DB_PASSWORD=.*|STRATAVORE_DB_PASSWORD=${STRAT_PW}|" ~/meridian-home/projects/Gantry/docker-secrets.env
+else
+  printf 'STRATAVORE_DB_PASSWORD=%s\n' "$STRAT_PW" >> ~/meridian-home/projects/Gantry/docker-secrets.env
+fi
 ```
 
 **Step 2: Verify**
@@ -368,7 +372,7 @@ gh pr create \
 ## Test plan
 
 - [ ] stratavore-sync.sh runs cleanly with no auth errors
-- [ ] All 19 schema tables present in stratavore_state
+- [ ] All 22 schema tables present in stratavore_state
 - [ ] V2 data re-imported (projects, rank events, directives)
 - [ ] grep for <old-placeholder-replaced> returns zero matches
 - [ ] Cron sync log clean for 15+ minutes
