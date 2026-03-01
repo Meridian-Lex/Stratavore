@@ -57,7 +57,8 @@ in Gantry postgres. Standalone postgres in docker-compose was a dead service wit
 - Exit code: 0
 
 **Cron registration**:
-```
+
+```bash
 */5 * * * * /home/meridian/stratavore-sync.sh >> /home/meridian/meridian-home/logs/stratavore-sync.log 2>&1
 ```
 
