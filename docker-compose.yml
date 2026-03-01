@@ -103,10 +103,10 @@ services:
       - "50051"  # gRPC API (internal only)
       - "9091"   # Prometheus metrics (internal only)
     environment:
-      STRATAVORE_DATABASE_POSTGRESQL_HOST: localhost
+      STRATAVORE_DATABASE_POSTGRESQL_HOST: host.docker.internal
       STRATAVORE_DATABASE_POSTGRESQL_PORT: 5432
       STRATAVORE_DATABASE_POSTGRESQL_USER: stratavore
-      STRATAVORE_DATABASE_POSTGRESQL_PASSWORD: ${STRATAVORE_DB_PASSWORD}
+      STRATAVORE_DATABASE_POSTGRESQL_PASSWORD: ${STRATAVORE_DB_PASSWORD:?STRATAVORE_DB_PASSWORD is required}
       STRATAVORE_DATABASE_POSTGRESQL_DATABASE: stratavore_state
       STRATAVORE_DOCKER_RABBITMQ_HOST: rabbitmq
       STRATAVORE_DOCKER_RABBITMQ_PORT: 5672
@@ -120,6 +120,8 @@ services:
       STRATAVORE_DOCKER_TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
       # GitHub fleet integration (set in .env file)
       STRATAVORE_GITHUB_TOKEN: ${GITHUB_TOKEN}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./configs/stratavore.yaml:/etc/stratavore/stratavore.yaml:ro
       - stratavore_data:/var/lib/stratavore
