@@ -69,7 +69,7 @@ A team of 6 specialized AI agents conducted a comprehensive 6-phase analysis of 
 1. **Remove Hard-coded Credentials**
    ```bash
    # Replace all hard-coded passwords with environment variables
-   sed -i 's/stratavore_dev_password_change_in_prod/$STRATAVORE_DB_PASSWORD/g' docker-compose.yml
+   # Credential replaced: docker-compose.yml now uses ${STRATAVORE_DB_PASSWORD}
    ```
 
 2. **Implement Secret Management**

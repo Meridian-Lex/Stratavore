@@ -9,7 +9,7 @@ database:
     port: 5432
     database: stratavore_state
     user: stratavore
-    password: stratavore_password  # Change in production!
+    password: ""  # Set via env: STRATAVORE_DATABASE_POSTGRESQL_PASSWORD=<from-secrets>
     sslmode: prefer
     max_conns: 25
     min_conns: 5

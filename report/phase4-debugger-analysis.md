@@ -135,15 +135,20 @@ func TestDaemonStartup(t *testing.T) {
 
 ### Potential Security Issues
 
-#### 1. **Secret Management** CRITICAL **High Priority**
+#### 1. **Secret Management** CRITICAL **High Priority** _(Pre-remediation finding)_
+
+> **Note:** This is a historical finding from the pre-remediation analysis. The password was
+> subsequently moved to `<from-secrets>` via secrets.yaml integration. The finding below
+> describes the state prior to the Gantry auth integration (PR fix/gantry-auth-integration).
+
 ```yaml
-# From docker-compose.yml:11
-POSTGRES_PASSWORD: stratavore_dev_password_change_in_prod
+# From docker-compose.yml:11 (historical — prior to remediation)
+POSTGRES_PASSWORD: <from-secrets>
 ```
 
-**Issue:** Hard-coded passwords in configuration
-**Recommendation:** Implement secret management with vault integration
-**Risk:** Credential exposure in version control
+**Issue:** Hard-coded passwords were present in configuration prior to remediation
+**Recommendation:** Implemented — secrets sourced from secrets.yaml; no credentials in version control
+**Risk:** Resolved — credential exposure risk eliminated by moving to environment-based provisioning
 
 #### 2. **JWT Key Storage** MEDIUM **Medium Priority**
 **Issue:** No visible JWT key rotation mechanism

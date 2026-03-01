@@ -20,7 +20,7 @@ echo "==> Setting up PostgreSQL database"
 
 # Create database and user
 docker exec lex-postgres psql -U postgres -c "CREATE DATABASE stratavore_state;" 2>/dev/null || echo " Database already exists"
-docker exec lex-postgres psql -U postgres -c "CREATE USER stratavore WITH PASSWORD 'stratavore_password';" 2>/dev/null || echo " User already exists"
+docker exec lex-postgres psql -U postgres -c "CREATE USER stratavore WITH PASSWORD '${STRATAVORE_DB_PASSWORD:?STRATAVORE_DB_PASSWORD not set}';" 2>/dev/null || echo " User already exists"
 docker exec lex-postgres psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE stratavore_state TO stratavore;" 2>/dev/null
 
 echo "[OK] Database created"
@@ -74,7 +74,7 @@ database:
     port: 5432
     database: stratavore_state
     user: stratavore
-    password: stratavore_password
+    password: ""  # Set via env: STRATAVORE_DATABASE_POSTGRESQL_PASSWORD
     sslmode: disable
     max_conns: 25
     min_conns: 5
@@ -119,7 +119,7 @@ echo "[OK] Docker integration complete!"
 echo "================================"
 echo ""
 echo "Connection details:"
-echo " PostgreSQL: postgresql://stratavore:stratavore_password@localhost:5432/stratavore_state"
+echo " PostgreSQL: postgresql://stratavore:<redacted>@localhost:5432/stratavore_state"
 echo " RabbitMQ: amqp://guest:guest@localhost:5672/"
 echo " ntfy: http://localhost:2586"
 echo ""
