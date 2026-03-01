@@ -138,7 +138,7 @@ func TestDaemonStartup(t *testing.T) {
 #### 1. **Secret Management** CRITICAL **High Priority**
 ```yaml
 # From docker-compose.yml:11
-POSTGRES_PASSWORD: stratavore_dev_password_change_in_prod
+POSTGRES_PASSWORD: <from-secrets>
 ```
 
 **Issue:** Hard-coded passwords in configuration
