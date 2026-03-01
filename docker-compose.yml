@@ -1,28 +1,6 @@
 version: '3.8'
 
 services:
-  # PostgreSQL with pgvector extension
-  postgres:
-    image: pgvector/pgvector:pg16
-    container_name: stratavore-postgres
-    environment:
-      POSTGRES_DB: stratavore_state
-      POSTGRES_USER: stratavore
-      POSTGRES_PASSWORD: stratavore_dev_password_change_in_prod
-      POSTGRES_INITDB_ARGS: "-E UTF8"
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./migrations/postgres:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U stratavore -d stratavore_state"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - stratavore
-
   # RabbitMQ message broker
   rabbitmq:
     image: rabbitmq:3.12-management-alpine
@@ -125,10 +103,10 @@ services:
       - "50051"  # gRPC API (internal only)
       - "9091"   # Prometheus metrics (internal only)
     environment:
-      STRATAVORE_DATABASE_POSTGRESQL_HOST: postgres
+      STRATAVORE_DATABASE_POSTGRESQL_HOST: localhost
       STRATAVORE_DATABASE_POSTGRESQL_PORT: 5432
       STRATAVORE_DATABASE_POSTGRESQL_USER: stratavore
-      STRATAVORE_DATABASE_POSTGRESQL_PASSWORD: stratavore_dev_password_change_in_prod
+      STRATAVORE_DATABASE_POSTGRESQL_PASSWORD: ${STRATAVORE_DB_PASSWORD}
       STRATAVORE_DATABASE_POSTGRESQL_DATABASE: stratavore_state
       STRATAVORE_DOCKER_RABBITMQ_HOST: rabbitmq
       STRATAVORE_DOCKER_RABBITMQ_PORT: 5672
@@ -146,8 +124,6 @@ services:
       - ./configs/stratavore.yaml:/etc/stratavore/stratavore.yaml:ro
       - stratavore_data:/var/lib/stratavore
     depends_on:
-      postgres:
-        condition: service_healthy
       rabbitmq:
         condition: service_healthy
       redis:
@@ -207,8 +183,6 @@ services:
       retries: 3
 
 volumes:
-  postgres_data:
-    driver: local
   rabbitmq_data:
     driver: local
   prometheus_data:
