@@ -18,7 +18,7 @@
 # Installs protoc and the Go gRPC plugins into a slim base image.
 # Pinning versions here makes builds reproducible.
 # -----------------------------------------------------------------------------
-FROM golang:1.22-alpine AS proto-toolchain
+FROM golang:1.23-alpine AS proto-toolchain
 
 ARG PROTOC_VERSION=25.3
 ARG TARGETOS=linux
@@ -101,7 +101,7 @@ RUN go test ./... -short -count=1 2>&1 | tee /tmp/test-results.txt || true && \
 # A scratch-like stage that copies only the compiled artifacts.
 # docker run --rm -v "$PWD/dist:/dist" stratavore-builder  copies bins out.
 # -----------------------------------------------------------------------------
-FROM alpine:3.19 AS export
+FROM alpine:3.23 AS export
 
 RUN apk add --no-cache ca-certificates tzdata
 
@@ -117,7 +117,7 @@ CMD ["sh", "-c", "echo '=== Built artifacts ===' && ls -lh /dist/bin/ && echo &&
 # Minimal production image containing the daemon binary.
 # This replicates Dockerfile.daemon but with gRPC compiled in.
 # -----------------------------------------------------------------------------
-FROM alpine:3.19 AS runtime
+FROM alpine:3.23 AS runtime
 
 LABEL org.opencontainers.image.title="stratavored (gRPC build)"
 LABEL org.opencontainers.image.description="Stratavore daemon with full gRPC/protobuf support"
