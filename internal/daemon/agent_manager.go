@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -127,7 +128,7 @@ func (m *AgentManager) GetAgent(ctx context.Context, agentID string) (*api.Agent
 		&updatedAt,
 	)
 
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("agent not found: %s", agentID)
 	}
 	if err != nil {
@@ -334,7 +335,7 @@ func (m *AgentManager) CommendAgent(ctx context.Context, req *api.CommendAgentRe
 		FOR UPDATE
 	`, req.AgentID).Scan(&agentID, &agentName, &currentRank, &rankProgress)
 
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return false, 0, fmt.Errorf("agent not found: %s", req.AgentID)
 	}
 	if err != nil {
@@ -443,7 +444,7 @@ func (m *AgentManager) StrikeAgent(ctx context.Context, req *api.StrikeAgentRequ
 		FOR UPDATE
 	`, req.AgentID).Scan(&agentID, &agentName, &currentRank, &strikes)
 
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return false, 0, fmt.Errorf("agent not found: %s", req.AgentID)
 	}
 	if err != nil {
