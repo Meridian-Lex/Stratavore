@@ -48,7 +48,7 @@ services:
 
   # nginx reverse proxy
   nginx:
-    image: nginx:1.27-alpine
+    image: nginx:1.27.4-alpine
     container_name: stratavore-nginx-test
     ports:
       - "8888:80"
