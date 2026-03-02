@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -105,7 +106,7 @@ func (c *PostgresClient) GetProject(ctx context.Context, name string) (*types.Pr
 	)
 
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("project not found: %s", name)
 		}
 		return nil, err
@@ -362,7 +363,7 @@ func (c *PostgresClient) GetRunner(ctx context.Context, runnerID string) (*types
 	)
 
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("runner not found: %s", runnerID)
 		}
 		return nil, err
@@ -560,7 +561,7 @@ func (c *PostgresClient) GetResourceQuota(ctx context.Context, projectName strin
 	)
 
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			// Return default quota
 			return &types.ResourceQuota{
 				ProjectName:          projectName,
@@ -636,7 +637,7 @@ func (c *PostgresClient) GetSession(ctx context.Context, sessionID string) (*typ
 	)
 
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("session not found: %s", sessionID)
 		}
 		return nil, err
@@ -783,7 +784,7 @@ func (c *PostgresClient) GetTokenBudget(ctx context.Context, scope, scopeID stri
 	)
 
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil // No budget configured
 		}
 		return nil, err
@@ -1012,7 +1013,7 @@ func (c *PostgresClient) GetSprint(ctx context.Context, id string, includeTasks 
 		&tagsJSON, &s.CreatedAt, &startedAt, &completedAt, &s.UpdatedAt,
 	)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("sprint not found: %s", id)
 		}
 		return nil, err
@@ -1253,11 +1254,11 @@ func (c *PostgresClient) CreateSprintExecution(ctx context.Context, sprintID, ex
 		return nil, err
 	}
 	return &types.SprintExecution{
-		ID:          id,
-		SprintID:    sprintID,
-		ExecutedBy:  executedBy,
-		Status:      "running",
-		TasksTotal:  tasksTotal,
+		ID:         id,
+		SprintID:   sprintID,
+		ExecutedBy: executedBy,
+		Status:     "running",
+		TasksTotal: tasksTotal,
 	}, nil
 }
 
@@ -1282,7 +1283,7 @@ func (c *PostgresClient) GetOperationalMode(ctx context.Context) (string, string
 		SELECT config FROM daemon_state WHERE singleton = true
 	`).Scan(&configJSON)
 
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		// No daemon state yet, return default
 		return "IDLE", "", nil
 	}
@@ -1421,7 +1422,7 @@ func (c *PostgresClient) GetDailyTokenBudget(ctx context.Context) (*types.TokenB
 	)
 
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil // No budget configured
 		}
 		return nil, err
@@ -1504,7 +1505,7 @@ func (c *PostgresClient) GetAgentByID(ctx context.Context, agentID string) (*api
 	`, agentID)
 
 	agent, err := scanAgentRow(row)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("agent not found: %s", agentID)
 	}
 	if err != nil {
@@ -1598,7 +1599,7 @@ func (c *PostgresClient) GetMissionByID(ctx context.Context, missionID string) (
 		&createdAt,
 	)
 
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("mission not found: %s", missionID)
 	}
 	if err != nil {
