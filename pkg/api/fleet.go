@@ -24,3 +24,9 @@ type FleetPRsResponse struct {
 	CachedAt time.Time `json:"cached_at"`
 	Total    int       `json:"total"`
 }
+
+// Len returns the number of PRs in the response. It is a convenience
+// accessor over len(PRs) that mirrors the Total field.
+func (r FleetPRsResponse) Len() int {
+	return len(r.PRs)
+}
