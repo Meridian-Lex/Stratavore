@@ -7,7 +7,7 @@ version: '3.8'
 services:
   # Mock daemon (simple HTTP server for API testing)
   mock-daemon:
-    image: python:3.11-alpine
+    image: python:3.14-alpine
     container_name: stratavore-mock-daemon
     working_dir: /app
     command: python3 /app/mock-daemon.py
@@ -48,7 +48,7 @@ services:
 
   # nginx reverse proxy
   nginx:
-    image: nginx:1.25-alpine
+    image: nginx:1.29-alpine
     container_name: stratavore-nginx-test
     ports:
       - "8888:80"
