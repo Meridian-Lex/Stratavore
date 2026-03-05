@@ -3,6 +3,8 @@ package api
 import "time"
 
 // FleetPR represents a single open pull request across fleet repositories.
+// PRs are aggregated from Meridian-Lex repositories via GitHub API and cached
+// for dashboard display. Only open (non-draft) PRs are included by default.
 type FleetPR struct {
 	Repo      string    `json:"repo"`
 	Number    int       `json:"number"`
@@ -15,6 +17,8 @@ type FleetPR struct {
 }
 
 // FleetPRsResponse is returned by GET /api/v1/fleet/prs.
+// CachedAt indicates when the PR list was last fetched from GitHub.
+// Total reflects the count of PRs in the response, not a GitHub total.
 type FleetPRsResponse struct {
 	PRs      []FleetPR `json:"prs"`
 	CachedAt time.Time `json:"cached_at"`
