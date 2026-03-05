@@ -1,175 +1,150 @@
 package parsers
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
-func TestParseRankStatus_ValidJSON(t *testing.T) {
-	json := `{
+// writeTemp writes content to a temp file and returns the path.
+func writeTemp(t *testing.T, name, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("writeTemp: %v", err)
+	}
+	return path
+}
+
+const statusJSON = `{
   "current_rank": "Ensign",
   "progress_toward_next": "2/5",
   "next_rank": "Lieutenant (JG)",
   "strikes": 2,
-  "strike_history": [
-    {
-      "strike": 1,
-      "date": "2026-02-07",
-      "infraction": "Test infraction 1",
-      "consequence": "Warning"
-    },
-    {
-      "strike": 2,
-      "date": "2026-02-08",
-      "infraction": "Test infraction 2",
-      "evidence": "PR #123",
-      "consequence": "Strike 2"
-    },
-    {
-      "note": "Promoted to Ensign",
-      "date": "2026-02-10"
-    }
-  ],
-  "commendations": [
-    {
-      "date": "2026-02-09",
-      "achievement": "Good work",
-      "details": "Completed task successfully",
-      "awarded_by": "Fleet Admiral",
-      "points": 1
-    }
-  ],
-  "rank_history": [
-    {
-      "rank": "Unranked",
-      "achieved": "2026-02-06",
-      "reason": "Starting rank"
-    },
-    {
-      "rank": "Ensign",
-      "achieved": "2026-02-10",
-      "reason": "Promoted"
-    }
-  ],
   "last_updated": "2026-02-10T12:00:00Z"
 }`
 
-	rankStatus, err := ParseRankStatus(json)
+const eventsJSONL = `{"type":"strike_event","strike":1,"date":"2026-02-07","infraction":"Test infraction 1","consequence":"Warning"}
+{"type":"strike_event","strike":2,"date":"2026-02-08","infraction":"Test infraction 2","evidence":"PR #123","consequence":"Strike 2"}
+{"type":"strike_event","note":"Promoted to Ensign","date":"2026-02-10"}
+{"type":"commendation","date":"2026-02-09","achievement":"Good work","details":"Completed task successfully","awarded_by":"Fleet Admiral","points":1}
+{"type":"rank_change","rank":"Unranked","achieved":"2026-02-06","reason":"Starting rank"}
+{"type":"rank_change","rank":"Ensign","achieved":"2026-02-10","reason":"Promoted"}
+`
+
+func TestParseRankFiles_ValidInput(t *testing.T) {
+	dir := t.TempDir()
+	statusPath := filepath.Join(dir, "rank-status.json")
+	eventsPath := filepath.Join(dir, "rank-events.jsonl")
+	os.WriteFile(statusPath, []byte(statusJSON), 0644)
+	os.WriteFile(eventsPath, []byte(eventsJSONL), 0644)
+
+	rs, err := ParseRankFiles(statusPath, eventsPath)
 	if err != nil {
-		t.Fatalf("ParseRankStatus failed: %v", err)
+		t.Fatalf("ParseRankFiles failed: %v", err)
 	}
 
-	// Verify basic fields
-	if rankStatus.CurrentRank != "Ensign" {
-		t.Errorf("Expected current_rank 'Ensign', got '%s'", rankStatus.CurrentRank)
+	if rs.CurrentRank != "Ensign" {
+		t.Errorf("expected current_rank 'Ensign', got '%s'", rs.CurrentRank)
 	}
-	if rankStatus.ProgressTowardNext != "2/5" {
-		t.Errorf("Expected progress '2/5', got '%s'", rankStatus.ProgressTowardNext)
+	if rs.ProgressTowardNext != "2/5" {
+		t.Errorf("expected progress '2/5', got '%s'", rs.ProgressTowardNext)
 	}
-	if rankStatus.Strikes != 2 {
-		t.Errorf("Expected 2 strikes, got %d", rankStatus.Strikes)
+	if rs.Strikes != 2 {
+		t.Errorf("expected 2 strikes, got %d", rs.Strikes)
 	}
-
-	// Verify strike history
-	if len(rankStatus.StrikeHistory) != 3 {
-		t.Fatalf("Expected 3 strike history entries, got %d", len(rankStatus.StrikeHistory))
+	if len(rs.StrikeHistory) != 3 {
+		t.Fatalf("expected 3 strike_history entries, got %d", len(rs.StrikeHistory))
 	}
-
-	if rankStatus.StrikeHistory[0].Strike != 1 {
-		t.Errorf("Expected strike 1, got %d", rankStatus.StrikeHistory[0].Strike)
+	if rs.StrikeHistory[0].Strike != 1 {
+		t.Errorf("expected strike 1, got %d", rs.StrikeHistory[0].Strike)
 	}
-	if rankStatus.StrikeHistory[2].Note != "Promoted to Ensign" {
-		t.Errorf("Expected note 'Promoted to Ensign', got '%s'", rankStatus.StrikeHistory[2].Note)
+	if rs.StrikeHistory[2].Note != "Promoted to Ensign" {
+		t.Errorf("expected note 'Promoted to Ensign', got '%s'", rs.StrikeHistory[2].Note)
 	}
-
-	// Verify commendations
-	if len(rankStatus.Commendations) != 1 {
-		t.Fatalf("Expected 1 commendation, got %d", len(rankStatus.Commendations))
+	if len(rs.Commendations) != 1 {
+		t.Fatalf("expected 1 commendation, got %d", len(rs.Commendations))
 	}
-	if rankStatus.Commendations[0].Points != 1 {
-		t.Errorf("Expected 1 point, got %d", rankStatus.Commendations[0].Points)
+	if rs.Commendations[0].Points != 1 {
+		t.Errorf("expected 1 point, got %d", rs.Commendations[0].Points)
 	}
-
-	// Verify rank history
-	if len(rankStatus.RankHistory) != 2 {
-		t.Fatalf("Expected 2 rank history entries, got %d", len(rankStatus.RankHistory))
+	if len(rs.RankHistory) != 2 {
+		t.Fatalf("expected 2 rank_history entries, got %d", len(rs.RankHistory))
 	}
 }
 
-func TestParseRankStatus_EmptyJSON(t *testing.T) {
-	json := `{}`
+func TestParseRankFiles_EmptyEvents(t *testing.T) {
+	dir := t.TempDir()
+	statusPath := filepath.Join(dir, "rank-status.json")
+	eventsPath := filepath.Join(dir, "rank-events.jsonl")
+	os.WriteFile(statusPath, []byte(`{"current_rank":"Ensign","strikes":0}`), 0644)
+	os.WriteFile(eventsPath, []byte(""), 0644)
 
-	rankStatus, err := ParseRankStatus(json)
+	rs, err := ParseRankFiles(statusPath, eventsPath)
 	if err != nil {
-		t.Fatalf("ParseRankStatus failed on empty JSON: %v", err)
+		t.Fatalf("ParseRankFiles failed on empty events: %v", err)
 	}
-
-	if rankStatus.CurrentRank != "" {
-		t.Errorf("Expected empty current_rank, got '%s'", rankStatus.CurrentRank)
+	if rs.CurrentRank != "Ensign" {
+		t.Errorf("expected 'Ensign', got '%s'", rs.CurrentRank)
 	}
-	if rankStatus.Strikes != 0 {
-		t.Errorf("Expected 0 strikes, got %d", rankStatus.Strikes)
+	if len(rs.StrikeHistory) != 0 {
+		t.Errorf("expected empty StrikeHistory")
 	}
 }
 
-func TestParseRankStatus_InvalidJSON(t *testing.T) {
-	json := `{"current_rank": invalid json`
+func TestParseRankFiles_InvalidStatusJSON(t *testing.T) {
+	dir := t.TempDir()
+	statusPath := filepath.Join(dir, "rank-status.json")
+	eventsPath := filepath.Join(dir, "rank-events.jsonl")
+	os.WriteFile(statusPath, []byte(`{"current_rank": invalid`), 0644)
+	os.WriteFile(eventsPath, []byte(""), 0644)
 
-	_, err := ParseRankStatus(json)
+	_, err := ParseRankFiles(statusPath, eventsPath)
 	if err == nil {
-		t.Fatal("Expected error for invalid JSON, got nil")
+		t.Fatal("expected error for invalid JSON, got nil")
+	}
+}
+
+func TestParseRankFiles_InvalidEventsLine(t *testing.T) {
+	dir := t.TempDir()
+	statusPath := filepath.Join(dir, "rank-status.json")
+	eventsPath := filepath.Join(dir, "rank-events.jsonl")
+	os.WriteFile(statusPath, []byte(`{"current_rank":"Ensign","strikes":0}`), 0644)
+	os.WriteFile(eventsPath, []byte(`{"type":"commendation","points":1}
+not valid json
+`), 0644)
+
+	_, err := ParseRankFiles(statusPath, eventsPath)
+	if err == nil {
+		t.Fatal("expected error for invalid JSONL line, got nil")
 	}
 }
 
 func TestGetRankEvents(t *testing.T) {
-	json := `{
-  "current_rank": "Ensign",
-  "progress_toward_next": "2/5",
-  "next_rank": "Lieutenant (JG)",
-  "strikes": 1,
-  "strike_history": [
-    {
-      "strike": 1,
-      "date": "2026-02-07",
-      "infraction": "Test violation",
-      "consequence": "Warning"
-    },
-    {
-      "note": "Promoted to Ensign",
-      "date": "2026-02-10"
-    }
-  ],
-  "commendations": [
-    {
-      "date": "2026-02-09",
-      "achievement": "Excellence",
-      "details": "Great work",
-      "awarded_by": "Admiral",
-      "points": 2
-    }
-  ],
-  "rank_history": [],
-  "last_updated": "2026-02-10T12:00:00Z"
-}`
+	dir := t.TempDir()
+	statusPath := filepath.Join(dir, "rank-status.json")
+	eventsPath := filepath.Join(dir, "rank-events.jsonl")
+	os.WriteFile(statusPath, []byte(statusJSON), 0644)
+	os.WriteFile(eventsPath, []byte(`{"type":"strike_event","strike":1,"date":"2026-02-07","infraction":"Test violation","consequence":"Warning"}
+{"type":"strike_event","note":"Promoted to Ensign","date":"2026-02-10"}
+{"type":"commendation","date":"2026-02-09","achievement":"Excellence","details":"Great work","awarded_by":"Admiral","points":2}
+`), 0644)
 
-	rankStatus, err := ParseRankStatus(json)
+	rs, err := ParseRankFiles(statusPath, eventsPath)
 	if err != nil {
-		t.Fatalf("ParseRankStatus failed: %v", err)
+		t.Fatalf("ParseRankFiles failed: %v", err)
 	}
 
-	events := rankStatus.GetRankEvents()
-
-	// Should have: 1 strike + 1 promotion note + 1 commendation = 3 events
+	events := rs.GetRankEvents()
+	// 1 strike + 1 promotion note + 1 commendation = 3 events
 	if len(events) != 3 {
-		t.Fatalf("Expected 3 rank events, got %d", len(events))
+		t.Fatalf("expected 3 rank events, got %d", len(events))
 	}
 
-	// Verify event types
-	strikeFound := false
-	promotionFound := false
-	commendationFound := false
-
-	for _, event := range events {
-		switch event.Type {
+	strikeFound, promotionFound, commendationFound := false, false, false
+	for _, ev := range events {
+		switch ev.Type {
 		case "strike":
 			strikeFound = true
 		case "promotion":
@@ -178,95 +153,33 @@ func TestGetRankEvents(t *testing.T) {
 			commendationFound = true
 		}
 	}
-
 	if !strikeFound {
-		t.Error("Expected to find strike event")
+		t.Error("expected to find strike event")
 	}
 	if !promotionFound {
-		t.Error("Expected to find promotion event")
+		t.Error("expected to find promotion event")
 	}
 	if !commendationFound {
-		t.Error("Expected to find commendation event")
+		t.Error("expected to find commendation event")
 	}
 }
 
-func TestParseRankStatus_RealWorldExample(t *testing.T) {
-	// Simplified version of actual rank-status.jsonl
-	json := `{
-  "current_rank": "Ensign",
-  "progress_toward_next": "2/5",
-  "next_rank": "Lieutenant (JG)",
-  "strikes": 2,
-  "strike_history": [
-    {
-      "strike": 1,
-      "date": "2026-02-07",
-      "infraction": "Direct edit to lex system files",
-      "consequence": "Warning issued"
-    },
-    {
-      "note": "Promoted to Ensign (0 strikes carried forward)",
-      "date": "2026-02-13"
-    },
-    {
-      "strike": 1,
-      "date": "2026-02-13",
-      "infraction": "Merged PR without heart react approval",
-      "evidence": "Stratavore PR #5",
-      "consequence": "Strike 1 issued"
-    }
-  ],
-  "commendations": [
-    {
-      "date": "2026-02-07",
-      "achievement": "Comprehensive UI enhancements",
-      "details": "Implemented search, filters, error handling",
-      "awarded_by": "Fleet Admiral Lunar Laurus",
-      "points": 1
-    },
-    {
-      "date": "2026-02-12",
-      "achievement": "Clean Stratavore acquisition",
-      "details": "Forked, configured remotes, authored project documentation",
-      "awarded_by": "Fleet Admiral Lunar Laurus",
-      "points": 1
-    }
-  ],
-  "rank_history": [
-    {
-      "rank": "Unranked",
-      "achieved": "2026-02-07",
-      "reason": "Starting rank"
-    },
-    {
-      "rank": "Ensign",
-      "achieved": "2026-02-13",
-      "reason": "5 commendation points accumulated"
-    }
-  ],
-  "last_updated": "2026-02-20T02:00:00Z"
-}`
+func TestParseRankFiles_DemotionType(t *testing.T) {
+	dir := t.TempDir()
+	statusPath := filepath.Join(dir, "rank-status.json")
+	eventsPath := filepath.Join(dir, "rank-events.jsonl")
+	os.WriteFile(statusPath, []byte(`{"current_rank":"Lieutenant (JG)","strikes":0}`), 0644)
+	os.WriteFile(eventsPath, []byte(`{"type":"demotion","date":"2026-03-05","from_rank":"Lieutenant Commander","to_rank":"Lieutenant","ordered_by":"Fleet Admiral Lunar Laurus","infraction":"Security posture violation","consequence":"Demotion 1 of 2"}
+`), 0644)
 
-	rankStatus, err := ParseRankStatus(json)
+	rs, err := ParseRankFiles(statusPath, eventsPath)
 	if err != nil {
-		t.Fatalf("ParseRankStatus failed on real-world example: %v", err)
+		t.Fatalf("ParseRankFiles failed: %v", err)
 	}
-
-	if rankStatus.CurrentRank != "Ensign" {
-		t.Errorf("Expected Ensign rank, got '%s'", rankStatus.CurrentRank)
+	if len(rs.RankHistory) != 1 {
+		t.Fatalf("expected 1 rank_history entry from demotion, got %d", len(rs.RankHistory))
 	}
-
-	if rankStatus.Strikes != 2 {
-		t.Errorf("Expected 2 strikes, got %d", rankStatus.Strikes)
-	}
-
-	if len(rankStatus.Commendations) != 2 {
-		t.Errorf("Expected 2 commendations, got %d", len(rankStatus.Commendations))
-	}
-
-	// Verify GetRankEvents processes correctly
-	events := rankStatus.GetRankEvents()
-	if len(events) < 3 { // At least 2 strikes + 2 commendations
-		t.Errorf("Expected at least 4 events, got %d", len(events))
+	if rs.RankHistory[0].Rank != "Lieutenant" {
+		t.Errorf("expected rank 'Lieutenant', got '%s'", rs.RankHistory[0].Rank)
 	}
 }

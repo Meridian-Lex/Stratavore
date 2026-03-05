@@ -79,7 +79,8 @@ func (c *PreMigrationChecks) CheckV2FilesExist() error {
 	}
 
 	directiveFiles := []string{
-		filepath.Join(c.V2Dir, "..", "directives", "rank-status.jsonl"),
+		filepath.Join(c.V2Dir, "..", "directives", "rank-status.json"),
+		filepath.Join(c.V2Dir, "..", "directives", "rank-events.jsonl"),
 		filepath.Join(c.V2Dir, "..", "directives", "behavioral-directives.jsonl"),
 	}
 
@@ -133,7 +134,8 @@ func (c *PreMigrationChecks) CheckV2FilesReadable() error {
 		filepath.Join(c.V2Dir, "PROJECT-MAP.md"),
 		filepath.Join(c.V2Dir, "time_sessions.jsonl"),
 		filepath.Join(c.V2Dir, "..", "config", "LEX-CONFIG.yaml"),
-		filepath.Join(c.V2Dir, "..", "directives", "rank-status.jsonl"),
+		filepath.Join(c.V2Dir, "..", "directives", "rank-status.json"),
+		filepath.Join(c.V2Dir, "..", "directives", "rank-events.jsonl"),
 		filepath.Join(c.V2Dir, "..", "directives", "behavioral-directives.jsonl"),
 	}
 

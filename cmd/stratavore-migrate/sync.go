@@ -44,7 +44,7 @@ Sync types:
   --type=projects   Sync PROJECT-MAP.md only
   --type=sessions   Sync time_sessions.jsonl only
   --type=config     Sync LEX-CONFIG.yaml only
-  --type=rank       Sync rank-status.jsonl only
+  --type=rank       Sync rank-status.json + rank-events.jsonl only
 
 Example:
   stratavore-migrate sync --v2-dir=/home/meridian/meridian-home/lex-internal/state
@@ -195,12 +195,13 @@ func syncConfig(ctx context.Context, tx pgx.Tx) error {
 }
 
 func syncRank(ctx context.Context, tx pgx.Tx) error {
-	fmt.Println("[Rank] Syncing rank-status.jsonl...")
+	fmt.Println("[Rank] Syncing rank-status.json + rank-events.jsonl...")
 
-	rankPath := filepath.Join(v2Dir, "..", "directives", "rank-status.jsonl")
-	rankStatus, err := parsers.ParseRankStatusFile(rankPath)
+	statusPath := filepath.Join(v2Dir, "..", "directives", "rank-status.json")
+	eventsPath := filepath.Join(v2Dir, "..", "directives", "rank-events.jsonl")
+	rankStatus, err := parsers.ParseRankFiles(statusPath, eventsPath)
 	if err != nil {
-		return fmt.Errorf("parse rank-status.jsonl: %w", err)
+		return fmt.Errorf("parse rank files: %w", err)
 	}
 
 	// For rank sync, we only want to add new events (append-only)
