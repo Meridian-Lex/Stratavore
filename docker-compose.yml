@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # RabbitMQ message broker
   rabbitmq:
-    image: rabbitmq:3.12-management-alpine
+    image: rabbitmq:3.13-management-alpine
     container_name: stratavore-rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: guest
@@ -166,7 +166,7 @@ services:
 
   # nginx Reverse Proxy (unified ingress)
   nginx:
-    image: nginx:1.25-alpine
+    image: nginx:1.29-alpine
     container_name: stratavore-nginx
     ports:
       - "8080:80"     # Unified HTTP ingress

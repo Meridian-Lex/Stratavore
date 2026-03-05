@@ -18,7 +18,7 @@
 # Installs protoc and the Go gRPC plugins into a slim base image.
 # Pinning versions here makes builds reproducible.
 # -----------------------------------------------------------------------------
-FROM golang:1.23-alpine AS proto-toolchain
+FROM golang:1.26-alpine AS proto-toolchain
 
 ARG PROTOC_VERSION=25.3
 ARG TARGETOS=linux
