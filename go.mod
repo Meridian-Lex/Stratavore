@@ -1,5 +1,6 @@
 module github.com/meridian-lex/stratavore
 
+// Container base images: see Dockerfile.builder, Dockerfile.daemon, docker-compose.yml
 go 1.24.0
 
 require (
