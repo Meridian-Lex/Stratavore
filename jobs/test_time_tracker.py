@@ -69,3 +69,60 @@ def test_md_append_includes_size_complexity(tmp_path):
     assert "L" in content
     assert "Complexity" in content
     assert "High" in content
+
+
+def test_md_append_no_completed_sessions(tmp_path, capsys):
+    """md_append prints an error when there are no completed sessions."""
+    t = make_tracker(tmp_path)
+    md_file = str(tmp_path / "TT3.md")
+    open(md_file, "w").close()
+    t.md_append("nonexistent-job", md_file=md_file)
+    captured = capsys.readouterr()
+    assert "[ERR]" in captured.out
+
+
+def test_md_append_negative_variance(tmp_path):
+    """md_append renders negative variance (faster than estimated) correctly."""
+    t = make_tracker(tmp_path)
+    sid = t.start_session("job6", "lex", "fast task")
+    # Force short duration by ending immediately then patching duration
+    t.end_session(sid)
+    sessions = t._load_sessions()
+    for s in sessions:
+        if s["session_id"] == sid:
+            s["duration_seconds"] = 300  # 5 min actual vs 20 min estimate → -75%
+    t._save_sessions(sessions)
+    md_file = str(tmp_path / "TT4.md")
+    open(md_file, "w").close()
+    t.md_append("job6", estimate_minutes=20, md_file=md_file)
+    content = open(md_file).read()
+    assert "Variance" in content
+    assert "-" in content  # negative variance present
+
+
+def test_md_append_persists_estimate_to_sessions(tmp_path):
+    """md_append with --estimate writes estimated_minutes back into the JSONL."""
+    t = make_tracker(tmp_path)
+    sid = t.start_session("job7", "lex", "tracked task")
+    t.end_session(sid)
+    md_file = str(tmp_path / "TT5.md")
+    open(md_file, "w").close()
+    t.md_append("job7", estimate_minutes=45, md_file=md_file)
+    sessions = t._load_sessions()
+    completed = [s for s in sessions if s["job_id"] == "job7" and s["status"] == "completed"]
+    assert completed
+    assert completed[0]["estimated_minutes"] == 45
+
+
+def test_start_session_invalid_size(tmp_path):
+    """start_session raises ValueError for unknown size."""
+    t = make_tracker(tmp_path)
+    with pytest.raises(ValueError, match="Invalid size"):
+        t.start_session("job8", "lex", size="XXL")
+
+
+def test_start_session_invalid_complexity(tmp_path):
+    """start_session raises ValueError for unknown complexity."""
+    t = make_tracker(tmp_path)
+    with pytest.raises(ValueError, match="Invalid complexity"):
+        t.start_session("job9", "lex", complexity="Extreme")

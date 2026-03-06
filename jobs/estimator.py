@@ -10,9 +10,11 @@ Usage:
   estimator.py annotate <session_id> --estimate N  Add estimated_minutes retroactively
 """
 
+import fcntl
 import json
 import os
 import sys
+import tempfile
 from datetime import datetime
 from typing import Optional
 
@@ -92,14 +94,13 @@ def estimate(size: str, complexity: str, sessions_file: str = DEFAULT_SESSIONS_F
     mult = COMPLEXITY_MULT[complexity]
     p50 = base * mult * variance_correction
 
-    # P80 and P95: empirical if enough samples, else fixed multipliers
-    if sample_count >= 20:
-        durations = sorted([(s["duration_seconds"] / 60) for s in matching])
-        p80 = durations[int(len(durations) * 0.8)]
-        p95 = durations[int(len(durations) * 0.95)]
-    elif sample_count >= 10:
-        durations = sorted([(s["duration_seconds"] / 60) for s in matching[-20:]])
-        p80 = durations[int(len(durations) * 0.8)]
+    # P80 and P95: empirical ratios if enough samples, else fixed multipliers
+    if sample_count >= 10:
+        ratios_sorted = sorted(
+            (s["duration_seconds"] / 60) / s["estimated_minutes"] for s in window
+        )
+        p80_ratio = ratios_sorted[min(int(len(ratios_sorted) * 0.8), len(ratios_sorted) - 1)]
+        p80 = base * mult * p80_ratio
         p95 = p50 * 2.5
     else:
         p80 = p50 * 1.5
@@ -178,20 +179,50 @@ def calibration(sessions_file: str = DEFAULT_SESSIONS_FILE):
 
 
 def annotate(session_id: str, estimated_minutes: int, sessions_file: str = DEFAULT_SESSIONS_FILE):
-    """Retroactively add estimated_minutes to a session."""
-    sessions = _load_sessions(sessions_file)
-    found = False
-    for s in sessions:
-        if s["session_id"] == session_id:
-            s["estimated_minutes"] = estimated_minutes
-            found = True
-            break
-    if not found:
-        print(f"[ERR] Session '{session_id}' not found.")
+    """Retroactively add estimated_minutes to a session.
+
+    Uses an exclusive file lock and atomic rename to prevent data loss when
+    time_tracker.py appends to the same file concurrently.
+    """
+    try:
+        f = open(sessions_file, "r+")
+    except FileNotFoundError:
+        print(f"[ERR] Sessions file not found: {sessions_file}")
         return
-    with open(sessions_file, "w") as f:
+
+    with f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        sessions = []
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                sessions.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+
+        found = False
         for s in sessions:
-            f.write(json.dumps(s) + "\n")
+            if s["session_id"] == session_id:
+                s["estimated_minutes"] = estimated_minutes
+                found = True
+                break
+        if not found:
+            print(f"[ERR] Session '{session_id}' not found.")
+            return
+
+        dir_name = os.path.dirname(os.path.abspath(sessions_file))
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=dir_name)
+        try:
+            with os.fdopen(tmp_fd, "w") as tmp:
+                for s in sessions:
+                    tmp.write(json.dumps(s) + "\n")
+            os.replace(tmp_path, sessions_file)
+        except Exception:
+            os.unlink(tmp_path)
+            raise
+
     print(f"Annotated '{session_id}' with estimated_minutes={estimated_minutes}")
 
 

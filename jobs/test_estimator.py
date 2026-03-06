@@ -3,8 +3,9 @@
 
 import json
 import time as t
+import io
 import pytest
-from estimator import estimate, BASE_MINUTES, COMPLEXITY_MULT
+from estimator import estimate, history, calibration, annotate, BASE_MINUTES, COMPLEXITY_MULT
 
 
 def test_bootstrap_no_history(tmp_path):
@@ -102,3 +103,110 @@ def test_sessions_without_estimate_ignored(tmp_path):
     # No usable ratio data → correction stays 1.0
     assert result["variance_correction"] == 1.0
     assert result["confidence"] == "low"
+
+
+def _make_session(i, size="M", complexity="Medium", estimated=45, duration=2700, status="completed"):
+    ts = t.time() - 7200 + i
+    return {
+        "session_id": f"job{i}_{int(ts)}",
+        "job_id": f"job{i}", "agent": "lex",
+        "status": status, "size": size, "complexity": complexity,
+        "start_timestamp": ts, "end_timestamp": ts + duration,
+        "duration_seconds": duration, "paused_time": 0, "pauses": [],
+        "estimated_minutes": estimated, "notes": "",
+        "start_time": "", "end_time": "", "created_at": ""
+    }
+
+
+def test_history_returns_completed_sessions(tmp_path, capsys):
+    """history() prints completed sessions in tabular form."""
+    sf = str(tmp_path / "h.jsonl")
+    with open(sf, "w") as f:
+        for i in range(3):
+            f.write(json.dumps(_make_session(i, size="S")) + "\n")
+    history(sessions_file=sf)
+    captured = capsys.readouterr()
+    assert "job0" in captured.out
+    assert "job1" in captured.out
+    assert "job2" in captured.out
+
+
+def test_history_filter_by_size(tmp_path, capsys):
+    """history(size_filter) only shows sessions with matching size."""
+    sf = str(tmp_path / "h.jsonl")
+    with open(sf, "w") as f:
+        f.write(json.dumps(_make_session(0, size="S")) + "\n")
+        f.write(json.dumps(_make_session(1, size="M")) + "\n")
+    history(size_filter="S", sessions_file=sf)
+    captured = capsys.readouterr()
+    assert "job0" in captured.out
+    assert "job1" not in captured.out
+
+
+def test_history_empty_file(tmp_path, capsys):
+    """history() with no sessions prints a message."""
+    sf = str(tmp_path / "empty.jsonl")
+    open(sf, "w").close()
+    history(sessions_file=sf)
+    captured = capsys.readouterr()
+    assert "No matching" in captured.out
+
+
+def test_calibration_output(tmp_path, capsys):
+    """calibration() prints a table with all size buckets."""
+    sf = str(tmp_path / "c.jsonl")
+    with open(sf, "w") as f:
+        for i in range(4):
+            f.write(json.dumps(_make_session(i, size="M", estimated=45, duration=1350)) + "\n")
+    calibration(sessions_file=sf)
+    captured = capsys.readouterr()
+    for size in ("XS", "S", "M", "L", "XL"):
+        assert size in captured.out
+    # M has 4 samples and ratio=0.5 → correction near 0.5
+    lines = captured.out.strip().splitlines()
+    m_line = next(l for l in lines if l.startswith("M"))
+    assert "0.500" in m_line
+
+
+def test_annotate_adds_estimate(tmp_path):
+    """annotate() writes estimated_minutes into the matching session."""
+    sf = str(tmp_path / "a.jsonl")
+    session = _make_session(0)
+    session.pop("estimated_minutes")
+    with open(sf, "w") as f:
+        f.write(json.dumps(session) + "\n")
+
+    annotate(session["session_id"], 60, sessions_file=sf)
+
+    with open(sf) as f:
+        saved = json.loads(f.readline())
+    assert saved["estimated_minutes"] == 60
+
+
+def test_annotate_missing_session(tmp_path, capsys):
+    """annotate() prints an error when session_id is not found."""
+    sf = str(tmp_path / "a.jsonl")
+    open(sf, "w").close()
+    annotate("nonexistent_id", 30, sessions_file=sf)
+    captured = capsys.readouterr()
+    assert "[ERR]" in captured.out
+
+
+def test_annotate_does_not_clobber_other_sessions(tmp_path):
+    """annotate() only modifies the target session; others are unchanged."""
+    sf = str(tmp_path / "a.jsonl")
+    s0 = _make_session(0)
+    s1 = _make_session(1)
+    s0.pop("estimated_minutes")
+    with open(sf, "w") as f:
+        f.write(json.dumps(s0) + "\n")
+        f.write(json.dumps(s1) + "\n")
+
+    annotate(s0["session_id"], 99, sessions_file=sf)
+
+    with open(sf) as f:
+        lines = [json.loads(l) for l in f if l.strip()]
+    target = next(s for s in lines if s["session_id"] == s0["session_id"])
+    other = next(s for s in lines if s["session_id"] == s1["session_id"])
+    assert target["estimated_minutes"] == 99
+    assert other["estimated_minutes"] == s1["estimated_minutes"]

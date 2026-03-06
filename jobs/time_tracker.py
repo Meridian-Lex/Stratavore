@@ -19,6 +19,9 @@ DEFAULT_SESSIONS_FILE = os.path.expanduser(
     "~/meridian-home/lex-internal/state/time_sessions.jsonl"
 )
 
+VALID_SIZES = {"XS", "S", "M", "L", "XL"}
+VALID_COMPLEXITY = {"Low", "Medium", "High"}
+
 
 class TimeTracker:
     def __init__(self):
@@ -69,6 +72,11 @@ class TimeTracker:
     def start_session(self, job_id: str, agent: str, description: str = "",
                       size: str = None, complexity: str = None) -> str:
         """Start a new work session."""
+        if size is not None and size not in VALID_SIZES:
+            raise ValueError(f"Invalid size '{size}'. Valid: {sorted(VALID_SIZES)}")
+        if complexity is not None and complexity not in VALID_COMPLEXITY:
+            raise ValueError(f"Invalid complexity '{complexity}'. Valid: {sorted(VALID_COMPLEXITY)}")
+
         # Warn if this job already has an active session
         active = [s for s in self._load_sessions()
                   if s["job_id"] == job_id and s["status"] == "active"]
@@ -330,14 +338,17 @@ class TimeTracker:
             lines.append(f"- **Notes**: {'; '.join(notes_lines)}")
         block = "\n".join(lines) + "\n"
 
+        # Persist estimated_minutes back to session JSONL for calibration
+        if estimate_minutes is not None:
+            self._persist_estimate(job_id, estimate_minutes)
+
         # Read existing content; insert before trailing --- if present
         if os.path.exists(md_file):
-            content = open(md_file).read()
+            with open(md_file) as f:
+                content = f.read()
         else:
             content = ""
 
-        # Find trailing separator to insert before it
-        sep = "\n---\n"
         if content.rstrip().endswith("---"):
             # Insert block before the trailing ---
             idx = content.rfind("\n---")
@@ -349,6 +360,14 @@ class TimeTracker:
             f.write(content)
 
         print(f"Appended session block for '{job_id}' to {md_file}")
+
+    def _persist_estimate(self, job_id: str, estimate_minutes: int) -> None:
+        """Write estimated_minutes into completed sessions for a job (for calibration)."""
+        sessions = self._load_sessions()
+        for s in sessions:
+            if s["job_id"] == job_id and s.get("status") == "completed" and not s.get("estimated_minutes"):
+                s["estimated_minutes"] = estimate_minutes
+        self._save_sessions(sessions)
 
     # ── Internal Helpers ──────────────────────────────────────────────────────
 

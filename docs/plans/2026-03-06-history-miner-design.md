@@ -99,7 +99,7 @@ else               → XL
 Complexity defaults to `Medium` when not found in archive.
 
 ### Deduplication Guard
-- Skip synthetic session if `job_id` already exists in `time_sessions.jsonl`
+- Skip synthetic session if `(job_id, start_timestamp)` tuple already exists in `time_sessions.jsonl`
 - Skip if session time window overlaps an existing real session for the same job
 - `"synthetic": true` and `"source": "git-mining"|"task-archive"` flags on all entries
 
@@ -151,7 +151,7 @@ Output: { "added": 12, "skipped_duplicate": 3, "skipped_no_data": 2,
 
 ## Repo Discovery
 
-Referenced repos resolved to local paths via lookup:
+Referenced repos are resolved to local paths via lookup:
 ```python
 REPO_MAP = {
     "Stratavore":    "~/meridian-home/projects/Stratavore",
@@ -185,7 +185,7 @@ Unresolvable repo references → logged as warnings, skipped.
 ## File Layout
 
 ```
-jobs/
+lex-internal/scripts/
   history_miner.py          coordinator + scout orchestration
   test_history_miner.py     unit tests for parsing/clustering algorithms
 ```
