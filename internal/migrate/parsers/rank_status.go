@@ -168,12 +168,16 @@ func ParseRankFiles(statusPath, eventsPath string) (*V2RankStatusFile, error) {
 				Achieved: ev.Date,
 				Reason:   fmt.Sprintf("Demotion from %s: %s", ev.FromRank, ev.Infraction),
 			})
+			demotionNote := fmt.Sprintf("Demotion from %s to %s ordered by %s", ev.FromRank, ev.ToRank, ev.OrderedBy)
+			if ev.Evidence != "" {
+				demotionNote += fmt.Sprintf(". Evidence: %s", ev.Evidence)
+			}
 			status.StrikeHistory = append(status.StrikeHistory, V2StrikeEvent{
 				Date:        ev.Date,
 				Infraction:  ev.Infraction,
 				Evidence:    ev.Evidence,
 				Consequence: ev.Consequence,
-				Note:        fmt.Sprintf("Demotion from %s to %s ordered by %s", ev.FromRank, ev.ToRank, ev.OrderedBy),
+				Note:        demotionNote,
 			})
 		default:
 			return nil, fmt.Errorf("rank-events.jsonl line %d: unknown event type %q", lineNum, ev.Type)
@@ -255,12 +259,13 @@ func (r *V2RankStatusFile) GetRankEvents() []V2RankEvent {
 			firstRankEmitted = true
 		}
 
-		desc := fmt.Sprintf("Rank: %s", rh.Rank)
-		if rh.Reason != "" {
-			desc += " — " + rh.Reason
+		description := rh.Reason
+		if description == "" {
+			description = rh.Note
 		}
-		if rh.Note != "" {
-			desc += " " + rh.Note
+		desc := fmt.Sprintf("Rank: %s", rh.Rank)
+		if description != "" {
+			desc += " — " + description
 		}
 
 		events = append(events, V2RankEvent{
