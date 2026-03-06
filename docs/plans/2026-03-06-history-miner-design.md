@@ -99,7 +99,9 @@ else               → XL
 Complexity defaults to `Medium` when not found in archive.
 
 ### Deduplication Guard
-- Skip synthetic session if `(job_id, start_timestamp)` tuple already exists in `time_sessions.jsonl`
+- Skip synthetic session if deduplication key already exists in `time_sessions.jsonl`
+- Deduplication key: `task_id + repo + commit_cluster_hash`
+  where `commit_cluster_hash = sha256(sorted_commit_shas).hexdigest()[:12]`
 - Skip if session time window overlaps an existing real session for the same job
 - `"synthetic": true` and `"source": "git-mining"|"task-archive"` flags on all entries
 

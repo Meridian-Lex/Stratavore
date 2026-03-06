@@ -95,18 +95,27 @@ def estimate(size: str, complexity: str, sessions_file: str = DEFAULT_SESSIONS_F
     mult = COMPLEXITY_MULT[complexity]
     p50 = base * mult * variance_correction
 
-    # P80 and P95: empirical ratios if enough samples, else fixed multipliers
-    if sample_count >= 10:
-        ratios_sorted = sorted(
-            (s["duration_seconds"] / 60) / s["estimated_minutes"] for s in window
-        )
-        p80_ratio = ratios_sorted[min(int(len(ratios_sorted) * 0.8), len(ratios_sorted) - 1)]
-        p95_ratio = ratios_sorted[min(int(len(ratios_sorted) * 0.95), len(ratios_sorted) - 1)]
-        p80 = base * mult * p80_ratio
-        p95 = base * mult * p95_ratio
+    # P80 and P95: empirical ratios from the ratio distribution if enough samples,
+    # else fixed multipliers.  Both are multiplied by base * mult (not base * mult * correction)
+    # so they represent the complexity-adjusted tail, not the mean-corrected value.
+    if sample_count >= 20:
+        ratios = sorted(r["duration_seconds"] / 60 / r["estimated_minutes"] for r in window)
+        p80_idx = int(len(ratios) * 0.80)
+        p95_idx = int(len(ratios) * 0.95)
+        p80 = base * mult * ratios[min(p80_idx, len(ratios) - 1)]
+        p95 = base * mult * ratios[min(p95_idx, len(ratios) - 1)]
+    elif sample_count >= 10:
+        ratios = sorted(r["duration_seconds"] / 60 / r["estimated_minutes"] for r in window)
+        p80_idx = int(len(ratios) * 0.80)
+        p80 = base * mult * ratios[min(p80_idx, len(ratios) - 1)]
+        p95 = p50 * 2.5
     else:
         p80 = p50 * 1.5
         p95 = p50 * 2.5
+
+    # Monotonicity guards: P80 >= P50 and P95 >= P80 must always hold.
+    p80 = max(p80, p50)
+    p95 = max(p95, p80)
 
     if sample_count >= 10:
         confidence = "high"
