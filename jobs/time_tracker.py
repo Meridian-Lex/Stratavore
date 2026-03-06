@@ -66,7 +66,8 @@ class TimeTracker:
 
     # ── Core Commands ─────────────────────────────────────────────────────────
 
-    def start_session(self, job_id: str, agent: str, description: str = "") -> str:
+    def start_session(self, job_id: str, agent: str, description: str = "",
+                      size: str = None, complexity: str = None) -> str:
         """Start a new work session."""
         # Warn if this job already has an active session
         active = [s for s in self._load_sessions()
@@ -85,6 +86,8 @@ class TimeTracker:
             "agent": agent,
             "description": description,
             "status": "active",
+            "size": size,
+            "complexity": complexity,
             "start_time": datetime.utcnow().isoformat() + "Z",
             "start_timestamp": now,
             "end_time": None,
@@ -280,6 +283,73 @@ class TimeTracker:
             for note in notes_lines:
                 print(f"  - {note}")
 
+    def md_append(self, job_id: str, estimate_minutes: int = None, md_file: str = None):
+        """Append a formatted session block to a TIME-TRACKING.md file."""
+        DEFAULT_MD = os.path.expanduser(
+            "~/meridian-home/lex-internal/state/TIME-TRACKING.md"
+        )
+        if md_file is None:
+            md_file = DEFAULT_MD
+
+        sessions = [s for s in self._load_sessions()
+                    if s["job_id"] == job_id and s["status"] == "completed"]
+        if not sessions:
+            print(f"[ERR] No completed sessions for job '{job_id}'.")
+            return
+
+        sessions.sort(key=lambda s: s["start_timestamp"])
+        first = sessions[0]
+        last = sessions[-1]
+        total_seconds = sum(s["duration_seconds"] for s in sessions if s["duration_seconds"])
+        total_duration = timedelta(seconds=int(total_seconds))
+        total_minutes = int(total_seconds / 60)
+
+        start_dt = datetime.fromisoformat(first["start_time"].rstrip("Z"))
+        end_dt = datetime.fromisoformat(last["end_time"].rstrip("Z"))
+
+        notes_lines = [s["notes"] for s in sessions if s.get("notes")]
+        size = last.get("size") or first.get("size")
+        complexity = last.get("complexity") or first.get("complexity")
+
+        date_str = start_dt.strftime("%Y-%m-%d")
+        lines = [f"### Session: {job_id} ({date_str})"]
+        if estimate_minutes is not None:
+            lines.append(f"- **Estimate**: {estimate_minutes} minutes")
+        lines.append(f"- **Actual**: {total_minutes} minutes ({total_duration})")
+        if estimate_minutes is not None and estimate_minutes > 0:
+            variance_pct = int(((total_minutes - estimate_minutes) / estimate_minutes) * 100)
+            sign = "+" if variance_pct >= 0 else ""
+            lines.append(f"- **Variance**: {sign}{variance_pct}%")
+        if size:
+            lines.append(f"- **Size**: {size}")
+        if complexity:
+            lines.append(f"- **Complexity**: {complexity}")
+        lines.append(f"- **Started**: {start_dt.strftime('%Y-%m-%d %H:%M:%S')} UTC")
+        lines.append(f"- **Completed**: {end_dt.strftime('%Y-%m-%d %H:%M:%S')} UTC")
+        if notes_lines:
+            lines.append(f"- **Notes**: {'; '.join(notes_lines)}")
+        block = "\n".join(lines) + "\n"
+
+        # Read existing content; insert before trailing --- if present
+        if os.path.exists(md_file):
+            content = open(md_file).read()
+        else:
+            content = ""
+
+        # Find trailing separator to insert before it
+        sep = "\n---\n"
+        if content.rstrip().endswith("---"):
+            # Insert block before the trailing ---
+            idx = content.rfind("\n---")
+            content = content[:idx] + "\n\n" + block + content[idx:]
+        else:
+            content = content.rstrip("\n") + "\n\n" + block
+
+        with open(md_file, "w") as f:
+            f.write(content)
+
+        print(f"Appended session block for '{job_id}' to {md_file}")
+
     # ── Internal Helpers ──────────────────────────────────────────────────────
 
     def _apply_resume(self, session: Dict) -> Dict:
@@ -325,7 +395,8 @@ Meridian Lex Time Tracker
 Usage: time_tracker.py <command> [args]
 
 Commands:
-  start <job_id> <agent> [description]  Start a new work session
+  start <job_id> <agent> [description] [--size XS|S|M|L|XL] [--complexity Low|Medium|High]
+                                        Start a new work session
   end   <session_id> [notes]            End an active session
   pause <session_id>                    Pause an active session
   resume <session_id>                   Resume a paused session
@@ -335,6 +406,8 @@ Commands:
   job   <job_id>                        Show cumulative time for a job
   all                                   Show stats for all jobs
   report <job_id>                       Generate TIME-TRACKING.md entry for a job
+  md-append <job_id> [--estimate N] [--file PATH]
+                                        Append session block to TIME-TRACKING.md
 
 Sessions file: {sessions_file}
 Override:      export LEX_TIME_SESSIONS=/path/to/file
@@ -352,10 +425,21 @@ def main():
 
     if cmd == "start":
         if len(sys.argv) < 4:
-            print("Usage: time_tracker.py start <job_id> <agent> [description]")
+            print("Usage: time_tracker.py start <job_id> <agent> [description] [--size S] [--complexity Medium]")
             return
-        tracker.start_session(sys.argv[2], sys.argv[3],
-                               sys.argv[4] if len(sys.argv) > 4 else "")
+        args = sys.argv[4:]
+        description = args[0] if args and not args[0].startswith("--") else ""
+        size = None
+        complexity = None
+        i = 1 if description else 0
+        while i < len(args):
+            if args[i] == "--size" and i + 1 < len(args):
+                size = args[i + 1]; i += 2
+            elif args[i] == "--complexity" and i + 1 < len(args):
+                complexity = args[i + 1]; i += 2
+            else:
+                i += 1
+        tracker.start_session(sys.argv[2], sys.argv[3], description, size=size, complexity=complexity)
 
     elif cmd == "end":
         if len(sys.argv) < 3:
@@ -398,6 +482,23 @@ def main():
             print("Usage: time_tracker.py report <job_id>")
             return
         tracker.generate_report(sys.argv[2])
+
+    elif cmd == "md-append":
+        if len(sys.argv) < 3:
+            print("Usage: time_tracker.py md-append <job_id> [--estimate N] [--file PATH]")
+            return
+        job_id = sys.argv[2]
+        estimate_minutes = None
+        md_file = None
+        i = 3
+        while i < len(sys.argv):
+            if sys.argv[i] == "--estimate" and i + 1 < len(sys.argv):
+                estimate_minutes = int(sys.argv[i + 1]); i += 2
+            elif sys.argv[i] == "--file" and i + 1 < len(sys.argv):
+                md_file = sys.argv[i + 1]; i += 2
+            else:
+                i += 1
+        tracker.md_append(job_id, estimate_minutes=estimate_minutes, md_file=md_file)
 
     else:
         print(f"[ERR] Unknown command: '{cmd}'")
