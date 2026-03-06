@@ -148,12 +148,20 @@ func ParseRankFiles(statusPath, eventsPath string) (*V2RankStatusFile, error) {
 				Note:     ev.Note,
 			})
 		case "demotion":
-			// Demotions appear in both rank_history and strike_history for context
+			// Demotions appear in both rank_history and strike_history for full context
 			status.RankHistory = append(status.RankHistory, V2RankHistoryEvent{
 				Rank:     ev.ToRank,
 				Achieved: ev.Date,
 				Reason:   fmt.Sprintf("Demotion from %s: %s", ev.FromRank, ev.Infraction),
 			})
+			status.StrikeHistory = append(status.StrikeHistory, V2StrikeEvent{
+				Date:        ev.Date,
+				Infraction:  ev.Infraction,
+				Consequence: ev.Consequence,
+				Note:        fmt.Sprintf("Demotion from %s to %s ordered by %s", ev.FromRank, ev.ToRank, ev.OrderedBy),
+			})
+		default:
+			return nil, fmt.Errorf("rank-events.jsonl line %d: unknown event type %q", lineNum, ev.Type)
 		}
 	}
 
@@ -198,6 +206,28 @@ func (r *V2RankStatusFile) GetRankEvents() []V2RankEvent {
 				Description: strike.Note,
 			})
 		}
+	}
+
+	// Add rank history events (rank_change and demotion)
+	for _, rh := range r.RankHistory {
+		date, err := time.Parse("2006-01-02", rh.Achieved)
+		if err != nil {
+			date, err = time.Parse(time.RFC3339, rh.Achieved)
+			if err != nil {
+				date = time.Time{}
+			}
+		}
+
+		eventType := "rank_change"
+		if rh.Reason != "" && contains(rh.Reason, "Demotion") {
+			eventType = "demotion"
+		}
+
+		events = append(events, V2RankEvent{
+			Type:        eventType,
+			Date:        date,
+			Description: fmt.Sprintf("Rank: %s — %s", rh.Rank, rh.Reason),
+		})
 	}
 
 	// Add commendations as events

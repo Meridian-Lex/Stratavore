@@ -34,11 +34,8 @@ const eventsJSONL = `{"type":"strike_event","strike":1,"date":"2026-02-07","infr
 `
 
 func TestParseRankFiles_ValidInput(t *testing.T) {
-	dir := t.TempDir()
-	statusPath := filepath.Join(dir, "rank-status.json")
-	eventsPath := filepath.Join(dir, "rank-events.jsonl")
-	os.WriteFile(statusPath, []byte(statusJSON), 0644)
-	os.WriteFile(eventsPath, []byte(eventsJSONL), 0644)
+	statusPath := writeTemp(t, "rank-status.json", statusJSON)
+	eventsPath := writeTemp(t, "rank-events.jsonl", eventsJSONL)
 
 	rs, err := ParseRankFiles(statusPath, eventsPath)
 	if err != nil {
@@ -75,11 +72,8 @@ func TestParseRankFiles_ValidInput(t *testing.T) {
 }
 
 func TestParseRankFiles_EmptyEvents(t *testing.T) {
-	dir := t.TempDir()
-	statusPath := filepath.Join(dir, "rank-status.json")
-	eventsPath := filepath.Join(dir, "rank-events.jsonl")
-	os.WriteFile(statusPath, []byte(`{"current_rank":"Ensign","strikes":0}`), 0644)
-	os.WriteFile(eventsPath, []byte(""), 0644)
+	statusPath := writeTemp(t, "rank-status.json", `{"current_rank":"Ensign","strikes":0}`)
+	eventsPath := writeTemp(t, "rank-events.jsonl", "")
 
 	rs, err := ParseRankFiles(statusPath, eventsPath)
 	if err != nil {
@@ -94,11 +88,8 @@ func TestParseRankFiles_EmptyEvents(t *testing.T) {
 }
 
 func TestParseRankFiles_InvalidStatusJSON(t *testing.T) {
-	dir := t.TempDir()
-	statusPath := filepath.Join(dir, "rank-status.json")
-	eventsPath := filepath.Join(dir, "rank-events.jsonl")
-	os.WriteFile(statusPath, []byte(`{"current_rank": invalid`), 0644)
-	os.WriteFile(eventsPath, []byte(""), 0644)
+	statusPath := writeTemp(t, "rank-status.json", `{"current_rank": invalid`)
+	eventsPath := writeTemp(t, "rank-events.jsonl", "")
 
 	_, err := ParseRankFiles(statusPath, eventsPath)
 	if err == nil {
@@ -107,13 +98,10 @@ func TestParseRankFiles_InvalidStatusJSON(t *testing.T) {
 }
 
 func TestParseRankFiles_InvalidEventsLine(t *testing.T) {
-	dir := t.TempDir()
-	statusPath := filepath.Join(dir, "rank-status.json")
-	eventsPath := filepath.Join(dir, "rank-events.jsonl")
-	os.WriteFile(statusPath, []byte(`{"current_rank":"Ensign","strikes":0}`), 0644)
-	os.WriteFile(eventsPath, []byte(`{"type":"commendation","points":1}
+	statusPath := writeTemp(t, "rank-status.json", `{"current_rank":"Ensign","strikes":0}`)
+	eventsPath := writeTemp(t, "rank-events.jsonl", `{"type":"commendation","points":1}
 not valid json
-`), 0644)
+`)
 
 	_, err := ParseRankFiles(statusPath, eventsPath)
 	if err == nil {
@@ -122,14 +110,11 @@ not valid json
 }
 
 func TestGetRankEvents(t *testing.T) {
-	dir := t.TempDir()
-	statusPath := filepath.Join(dir, "rank-status.json")
-	eventsPath := filepath.Join(dir, "rank-events.jsonl")
-	os.WriteFile(statusPath, []byte(statusJSON), 0644)
-	os.WriteFile(eventsPath, []byte(`{"type":"strike_event","strike":1,"date":"2026-02-07","infraction":"Test violation","consequence":"Warning"}
+	statusPath := writeTemp(t, "rank-status.json", statusJSON)
+	eventsPath := writeTemp(t, "rank-events.jsonl", `{"type":"strike_event","strike":1,"date":"2026-02-07","infraction":"Test violation","consequence":"Warning"}
 {"type":"strike_event","note":"Promoted to Ensign","date":"2026-02-10"}
 {"type":"commendation","date":"2026-02-09","achievement":"Excellence","details":"Great work","awarded_by":"Admiral","points":2}
-`), 0644)
+`)
 
 	rs, err := ParseRankFiles(statusPath, eventsPath)
 	if err != nil {
@@ -165,12 +150,9 @@ func TestGetRankEvents(t *testing.T) {
 }
 
 func TestParseRankFiles_DemotionType(t *testing.T) {
-	dir := t.TempDir()
-	statusPath := filepath.Join(dir, "rank-status.json")
-	eventsPath := filepath.Join(dir, "rank-events.jsonl")
-	os.WriteFile(statusPath, []byte(`{"current_rank":"Lieutenant (JG)","strikes":0}`), 0644)
-	os.WriteFile(eventsPath, []byte(`{"type":"demotion","date":"2026-03-05","from_rank":"Lieutenant Commander","to_rank":"Lieutenant","ordered_by":"Fleet Admiral Lunar Laurus","infraction":"Security posture violation","consequence":"Demotion 1 of 2"}
-`), 0644)
+	statusPath := writeTemp(t, "rank-status.json", `{"current_rank":"Lieutenant (JG)","strikes":0}`)
+	eventsPath := writeTemp(t, "rank-events.jsonl", `{"type":"demotion","date":"2026-03-05","from_rank":"Lieutenant Commander","to_rank":"Lieutenant","ordered_by":"Fleet Admiral Lunar Laurus","infraction":"Security posture violation","consequence":"Demotion 1 of 2"}
+`)
 
 	rs, err := ParseRankFiles(statusPath, eventsPath)
 	if err != nil {
@@ -181,5 +163,31 @@ func TestParseRankFiles_DemotionType(t *testing.T) {
 	}
 	if rs.RankHistory[0].Rank != "Lieutenant" {
 		t.Errorf("expected rank 'Lieutenant', got '%s'", rs.RankHistory[0].Rank)
+	}
+
+	// Verify demotion also appears in StrikeHistory
+	if len(rs.StrikeHistory) != 1 {
+		t.Fatalf("expected 1 strike_history entry from demotion, got %d", len(rs.StrikeHistory))
+	}
+
+	// Verify GetRankEvents emits the demotion event
+	events := rs.GetRankEvents()
+	demotionFound := false
+	for _, ev := range events {
+		if ev.Type == "demotion" {
+			demotionFound = true
+			if ev.Date.IsZero() {
+				t.Error("expected non-zero date on demotion event")
+			}
+		}
+	}
+	if !demotionFound {
+		t.Errorf("expected demotion event in GetRankEvents(), got types: %v", func() []string {
+			var types []string
+			for _, ev := range events {
+				types = append(types, ev.Type)
+			}
+			return types
+		}())
 	}
 }
