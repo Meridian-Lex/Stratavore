@@ -195,9 +195,9 @@ func (r *V2RankStatusFile) GetRankEvents() []V2RankEvent {
 			})
 		} else if strike.Note != "" {
 			eventType := "note"
-			if contains(strike.Note, "Promoted") {
+			if strings.Contains(strike.Note, "Promoted") {
 				eventType = "promotion"
-			} else if contains(strike.Note, "Demoted") || contains(strike.Note, "Demotion") {
+			} else if strings.Contains(strike.Note, "Demoted") || strings.Contains(strike.Note, "Demotion") {
 				eventType = "demotion"
 			}
 			events = append(events, V2RankEvent{
@@ -208,8 +208,15 @@ func (r *V2RankStatusFile) GetRankEvents() []V2RankEvent {
 		}
 	}
 
-	// Add rank history events (rank_change and demotion)
+	// Add rank history events. Demotions are skipped here because ParseRankFiles
+	// appends them to both RankHistory and StrikeHistory; the StrikeHistory loop
+	// above already emits the demotion event, so re-emitting from RankHistory
+	// would produce duplicates in rank_tracking.
 	for i, rh := range r.RankHistory {
+		if strings.Contains(rh.Reason, "Demotion") {
+			continue
+		}
+
 		date, err := time.Parse("2006-01-02", rh.Achieved)
 		if err != nil {
 			date, err = time.Parse(time.RFC3339, rh.Achieved)
@@ -222,14 +229,19 @@ func (r *V2RankStatusFile) GetRankEvents() []V2RankEvent {
 		if i == 0 {
 			eventType = "initial"
 		}
-		if rh.Reason != "" && contains(rh.Reason, "Demotion") {
-			eventType = "demotion"
+
+		desc := fmt.Sprintf("Rank: %s", rh.Rank)
+		if rh.Reason != "" {
+			desc += " — " + rh.Reason
+		}
+		if rh.Note != "" {
+			desc += " " + rh.Note
 		}
 
 		events = append(events, V2RankEvent{
 			Type:        eventType,
 			Date:        date,
-			Description: fmt.Sprintf("Rank: %s — %s", rh.Rank, rh.Reason),
+			Description: desc,
 		})
 	}
 
@@ -256,24 +268,3 @@ func (r *V2RankStatusFile) GetRankEvents() []V2RankEvent {
 	return events
 }
 
-// Helper functions
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && s != "" && substr != "" &&
-		(s == substr || findSubstring(s, substr))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		match := true
-		for j := 0; j < len(substr); j++ {
-			if s[i+j] != substr[j] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-	return false
-}
