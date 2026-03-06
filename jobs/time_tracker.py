@@ -512,7 +512,12 @@ def main():
         i = 3
         while i < len(sys.argv):
             if sys.argv[i] == "--estimate" and i + 1 < len(sys.argv):
-                estimate_minutes = int(sys.argv[i + 1]); i += 2
+                try:
+                    estimate_minutes = int(sys.argv[i + 1])
+                except ValueError:
+                    print(f"[ERR] --estimate requires an integer, got: '{sys.argv[i + 1]}'")
+                    return
+                i += 2
             elif sys.argv[i] == "--file" and i + 1 < len(sys.argv):
                 md_file = sys.argv[i + 1]; i += 2
             else:

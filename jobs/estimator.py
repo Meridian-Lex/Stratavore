@@ -18,8 +18,9 @@ import tempfile
 from datetime import datetime
 from typing import Optional
 
-DEFAULT_SESSIONS_FILE = os.path.expanduser(
-    "~/meridian-home/lex-internal/state/time_sessions.jsonl"
+DEFAULT_SESSIONS_FILE = os.environ.get(
+    "LEX_TIME_SESSIONS",
+    os.path.expanduser("~/meridian-home/lex-internal/state/time_sessions.jsonl"),
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -100,8 +101,9 @@ def estimate(size: str, complexity: str, sessions_file: str = DEFAULT_SESSIONS_F
             (s["duration_seconds"] / 60) / s["estimated_minutes"] for s in window
         )
         p80_ratio = ratios_sorted[min(int(len(ratios_sorted) * 0.8), len(ratios_sorted) - 1)]
+        p95_ratio = ratios_sorted[min(int(len(ratios_sorted) * 0.95), len(ratios_sorted) - 1)]
         p80 = base * mult * p80_ratio
-        p95 = p50 * 2.5
+        p95 = base * mult * p95_ratio
     else:
         p80 = p50 * 1.5
         p95 = p50 * 2.5
@@ -293,7 +295,12 @@ def main():
         i = 3
         while i < len(sys.argv):
             if sys.argv[i] == "--estimate" and i + 1 < len(sys.argv):
-                est = int(sys.argv[i + 1]); i += 2
+                try:
+                    est = int(sys.argv[i + 1])
+                except ValueError:
+                    print(f"[ERR] --estimate requires an integer, got: '{sys.argv[i + 1]}'")
+                    return
+                i += 2
             else:
                 i += 1
         if est is None:
