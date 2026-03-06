@@ -1,16 +1,13 @@
 package validator
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/meridian-lex/stratavore/internal/migrate/parsers"
 )
 
 // PreMigrationChecks performs all pre-migration validation checks
@@ -286,51 +283,13 @@ func (c *PreMigrationChecks) CheckV2FilesValid() error {
 		}
 	}
 
-	// Validate rank-status.json is valid JSON
+	// Validate rank files using the actual parser to ensure consistency
 	rankStatusPath := filepath.Join(c.V2Dir, "..", "directives", "rank-status.json")
-	rankStatusContent, err := os.ReadFile(rankStatusPath)
-	if err != nil {
-		return &ValidationError{
-			Check:   "V2FilesValid",
-			Message: fmt.Sprintf("cannot read rank-status.json: %v", err),
-		}
-	}
-	if !json.Valid(rankStatusContent) {
-		return &ValidationError{
-			Check:   "V2FilesValid",
-			Message: "rank-status.json contains invalid JSON",
-		}
-	}
-
-	// Validate rank-events.jsonl — each non-empty line must be valid JSON
 	rankEventsPath := filepath.Join(c.V2Dir, "..", "directives", "rank-events.jsonl")
-	rankEventsContent, err := os.ReadFile(rankEventsPath)
-	if err != nil {
+	if _, err := parsers.ParseRankFiles(rankStatusPath, rankEventsPath); err != nil {
 		return &ValidationError{
 			Check:   "V2FilesValid",
-			Message: fmt.Sprintf("cannot read rank-events.jsonl: %v", err),
-		}
-	}
-	scanner := bufio.NewScanner(bytes.NewReader(rankEventsContent))
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-	lineNum := 0
-	for scanner.Scan() {
-		lineNum++
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if !json.Valid([]byte(line)) {
-			return &ValidationError{
-				Check:   "V2FilesValid",
-				Message: fmt.Sprintf("rank-events.jsonl line %d contains invalid JSON", lineNum),
-			}
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return &ValidationError{
-			Check:   "V2FilesValid",
-			Message: fmt.Sprintf("scan rank-events.jsonl: %v", err),
+			Message: err.Error(),
 		}
 	}
 
