@@ -191,3 +191,98 @@ func TestParseRankFiles_DemotionType(t *testing.T) {
 		}())
 	}
 }
+
+func TestParseRankFiles_CommentsAndBlankLines(t *testing.T) {
+	statusPath := writeTemp(t, "rank-status.json", `{"current_rank":"Ensign","strikes":0}`)
+	eventsPath := writeTemp(t, "rank-events.jsonl", `# This is a comment
+# Another comment
+
+{"type":"commendation","date":"2026-02-09","achievement":"Good work","details":"Done","awarded_by":"Admiral","points":1}
+
+# trailing comment
+`)
+
+	rs, err := ParseRankFiles(statusPath, eventsPath)
+	if err != nil {
+		t.Fatalf("ParseRankFiles failed on file with comments/blanks: %v", err)
+	}
+	if len(rs.Commendations) != 1 {
+		t.Errorf("expected 1 commendation, got %d", len(rs.Commendations))
+	}
+	if len(rs.StrikeHistory) != 0 {
+		t.Errorf("expected empty StrikeHistory, got %d entries", len(rs.StrikeHistory))
+	}
+}
+
+func TestParseRankFiles_RankChangeMissingFields(t *testing.T) {
+	statusPath := writeTemp(t, "rank-status.json", `{"current_rank":"Ensign","strikes":0}`)
+	eventsPath := writeTemp(t, "rank-events.jsonl", `{"type":"rank_change","reason":"Starting rank"}
+`)
+
+	_, err := ParseRankFiles(statusPath, eventsPath)
+	if err == nil {
+		t.Fatal("expected error for rank_change missing required fields, got nil")
+	}
+}
+
+func TestParseRankFiles_DemotionEvidencePreserved(t *testing.T) {
+	statusPath := writeTemp(t, "rank-status.json", `{"current_rank":"Lieutenant (JG)","strikes":0}`)
+	eventsPath := writeTemp(t, "rank-events.jsonl", `{"type":"demotion","date":"2026-03-05","from_rank":"Lieutenant","to_rank":"Lieutenant (JG)","ordered_by":"Fleet Admiral Lunar Laurus","infraction":"Emoji violation","evidence":"PR #13","consequence":"Demotion"}
+`)
+
+	rs, err := ParseRankFiles(statusPath, eventsPath)
+	if err != nil {
+		t.Fatalf("ParseRankFiles failed: %v", err)
+	}
+	if len(rs.StrikeHistory) != 1 {
+		t.Fatalf("expected 1 strike_history entry, got %d", len(rs.StrikeHistory))
+	}
+	if rs.StrikeHistory[0].Evidence != "PR #13" {
+		t.Errorf("expected Evidence 'PR #13' on demotion StrikeEvent, got '%s'", rs.StrikeHistory[0].Evidence)
+	}
+
+	// Evidence should also surface in the emitted rank event
+	events := rs.GetRankEvents()
+	for _, ev := range events {
+		if ev.Type == "demotion" && ev.Evidence != "PR #13" {
+			t.Errorf("expected Evidence 'PR #13' on demotion rank event, got '%s'", ev.Evidence)
+		}
+	}
+}
+
+func TestGetRankEvents_InitialLabelWithLeadingDemotion(t *testing.T) {
+	// When a demotion precedes the first rank_change, the first non-demotion
+	// rank event must still be labelled "initial", not "promotion".
+	statusPath := writeTemp(t, "rank-status.json", `{"current_rank":"Lieutenant (JG)","strikes":0}`)
+	eventsPath := writeTemp(t, "rank-events.jsonl", `{"type":"demotion","date":"2026-03-01","from_rank":"Lieutenant","to_rank":"Lieutenant (JG)","ordered_by":"Fleet Admiral Lunar Laurus","infraction":"Violation","consequence":"Demotion"}
+{"type":"rank_change","rank":"Lieutenant (JG)","achieved":"2026-02-01","reason":"Starting rank"}
+{"type":"rank_change","rank":"Lieutenant","achieved":"2026-02-15","reason":"Promoted"}
+`)
+
+	rs, err := ParseRankFiles(statusPath, eventsPath)
+	if err != nil {
+		t.Fatalf("ParseRankFiles failed: %v", err)
+	}
+
+	events := rs.GetRankEvents()
+	initialCount := 0
+	for _, ev := range events {
+		if ev.Type == "initial" {
+			initialCount++
+		}
+	}
+	if initialCount != 1 {
+		t.Errorf("expected exactly 1 'initial' event, got %d", initialCount)
+	}
+
+	// Verify the second rank_change is "promotion" not "initial"
+	promotionCount := 0
+	for _, ev := range events {
+		if ev.Type == "promotion" {
+			promotionCount++
+		}
+	}
+	if promotionCount != 1 {
+		t.Errorf("expected exactly 1 'promotion' event, got %d", promotionCount)
+	}
+}

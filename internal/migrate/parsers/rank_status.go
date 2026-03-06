@@ -12,6 +12,13 @@ import (
 // V2RankStatusFile represents the combined rank state and event history.
 // State fields come from rank-status.json; history arrays are populated
 // from rank-events.jsonl via ParseRankFiles.
+//
+// Note: StrikeHistory, Commendations, and RankHistory carry json:"-" tags.
+// They are intentionally excluded from direct JSON unmarshalling because
+// rank-status.json only holds the current-state snapshot; history is
+// reconstructed from rank-events.jsonl by ParseRankFiles. Callers that
+// unmarshal V2RankStatusFile directly will receive empty slices for these
+// fields unless they call ParseRankFiles.
 type V2RankStatusFile struct {
 	CurrentRank        string               `json:"current_rank"`
 	ProgressTowardNext string               `json:"progress_toward_next"` // e.g., "2/5"
@@ -140,6 +147,9 @@ func ParseRankFiles(statusPath, eventsPath string) (*V2RankStatusFile, error) {
 				Reason:      ev.Reason,
 			})
 		case "rank_change":
+			if ev.Rank == "" || ev.Achieved == "" {
+				return nil, fmt.Errorf("rank-events.jsonl line %d: rank_change missing required fields (rank, achieved)", lineNum)
+			}
 			status.RankHistory = append(status.RankHistory, V2RankHistoryEvent{
 				Rank:     ev.Rank,
 				Achieved: ev.Achieved,
@@ -148,7 +158,11 @@ func ParseRankFiles(statusPath, eventsPath string) (*V2RankStatusFile, error) {
 				Note:     ev.Note,
 			})
 		case "demotion":
-			// Demotions appear in both rank_history and strike_history for full context
+			// Demotions appear in both rank_history and strike_history for full context.
+			// RankHistory records the resulting rank; StrikeHistory carries the full
+			// rationale including infraction, evidence, and ordered-by fields.
+			// GetRankEvents emits the demotion event from StrikeHistory only, skipping
+			// the matching RankHistory entry to avoid duplicates.
 			status.RankHistory = append(status.RankHistory, V2RankHistoryEvent{
 				Rank:     ev.ToRank,
 				Achieved: ev.Date,
@@ -157,6 +171,7 @@ func ParseRankFiles(statusPath, eventsPath string) (*V2RankStatusFile, error) {
 			status.StrikeHistory = append(status.StrikeHistory, V2StrikeEvent{
 				Date:        ev.Date,
 				Infraction:  ev.Infraction,
+				Evidence:    ev.Evidence,
 				Consequence: ev.Consequence,
 				Note:        fmt.Sprintf("Demotion from %s to %s ordered by %s", ev.FromRank, ev.ToRank, ev.OrderedBy),
 			})
@@ -172,7 +187,9 @@ func ParseRankFiles(statusPath, eventsPath string) (*V2RankStatusFile, error) {
 	return &status, nil
 }
 
-// GetRankEvents converts the rank status file into a flat list of rank_tracking events
+// GetRankEvents converts the rank status file into a flat list of rank_tracking events.
+// All emitted event types conform to the rank_tracking.event_type CHECK constraint:
+// strike, commendation, promotion, demotion, initial, note.
 func (r *V2RankStatusFile) GetRankEvents() []V2RankEvent {
 	var events []V2RankEvent
 
@@ -204,6 +221,7 @@ func (r *V2RankStatusFile) GetRankEvents() []V2RankEvent {
 				Type:        eventType,
 				Date:        date,
 				Description: strike.Note,
+				Evidence:    strike.Evidence,
 			})
 		}
 	}
@@ -212,7 +230,13 @@ func (r *V2RankStatusFile) GetRankEvents() []V2RankEvent {
 	// appends them to both RankHistory and StrikeHistory; the StrikeHistory loop
 	// above already emits the demotion event, so re-emitting from RankHistory
 	// would produce duplicates in rank_tracking.
-	for i, rh := range r.RankHistory {
+	//
+	// firstRankEmitted tracks whether the first non-demotion rank event has been
+	// emitted. Using the raw slice index i==0 is incorrect because leading demotion
+	// entries are skipped by the continue below, which would then mislabel the
+	// first emitted event as "promotion" rather than "initial".
+	firstRankEmitted := false
+	for _, rh := range r.RankHistory {
 		if strings.Contains(rh.Reason, "Demotion") {
 			continue
 		}
@@ -226,8 +250,9 @@ func (r *V2RankStatusFile) GetRankEvents() []V2RankEvent {
 		}
 
 		eventType := "promotion"
-		if i == 0 {
+		if !firstRankEmitted {
 			eventType = "initial"
+			firstRankEmitted = true
 		}
 
 		desc := fmt.Sprintf("Rank: %s", rh.Rank)
@@ -267,4 +292,3 @@ func (r *V2RankStatusFile) GetRankEvents() []V2RankEvent {
 
 	return events
 }
-
