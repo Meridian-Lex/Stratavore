@@ -312,6 +312,7 @@ func (c *PreMigrationChecks) CheckV2FilesValid() error {
 		}
 	}
 	scanner := bufio.NewScanner(bytes.NewReader(rankEventsContent))
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	lineNum := 0
 	for scanner.Scan() {
 		lineNum++
@@ -324,6 +325,12 @@ func (c *PreMigrationChecks) CheckV2FilesValid() error {
 				Check:   "V2FilesValid",
 				Message: fmt.Sprintf("rank-events.jsonl line %d contains invalid JSON", lineNum),
 			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return &ValidationError{
+			Check:   "V2FilesValid",
+			Message: fmt.Sprintf("scan rank-events.jsonl: %v", err),
 		}
 	}
 

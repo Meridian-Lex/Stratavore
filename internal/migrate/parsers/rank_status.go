@@ -209,7 +209,7 @@ func (r *V2RankStatusFile) GetRankEvents() []V2RankEvent {
 	}
 
 	// Add rank history events (rank_change and demotion)
-	for _, rh := range r.RankHistory {
+	for i, rh := range r.RankHistory {
 		date, err := time.Parse("2006-01-02", rh.Achieved)
 		if err != nil {
 			date, err = time.Parse(time.RFC3339, rh.Achieved)
@@ -218,7 +218,10 @@ func (r *V2RankStatusFile) GetRankEvents() []V2RankEvent {
 			}
 		}
 
-		eventType := "rank_change"
+		eventType := "promotion"
+		if i == 0 {
+			eventType = "initial"
+		}
 		if rh.Reason != "" && contains(rh.Reason, "Demotion") {
 			eventType = "demotion"
 		}
