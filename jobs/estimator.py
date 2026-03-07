@@ -118,13 +118,7 @@ def estimate(size: str, complexity: str, sessions_file: str = DEFAULT_SESSIONS_F
     tail_window = matching[-TAIL_SAMPLE_SIZE:]
     tail_sample_count = len(tail_window)
 
-    if tail_sample_count >= 20:
-        ratios = sorted(s["duration_seconds"] / 60 / s["estimated_minutes"] for s in tail_window)
-        p80_idx = int(len(ratios) * 0.80)
-        p95_idx = int(len(ratios) * 0.95)
-        p80 = base * mult * ratios[min(p80_idx, len(ratios) - 1)]
-        p95 = base * mult * ratios[min(p95_idx, len(ratios) - 1)]
-    elif tail_sample_count >= 10:
+    if tail_sample_count >= 10:
         ratios = sorted(s["duration_seconds"] / 60 / s["estimated_minutes"] for s in tail_window)
         p80_idx = int(len(ratios) * 0.80)
         p95_idx = int(len(ratios) * 0.95)

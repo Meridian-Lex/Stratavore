@@ -348,7 +348,7 @@ class TimeTracker:
             return content[:idx] + "\n\n" + block + content[idx:]
         return content.rstrip("\n") + "\n\n" + block
 
-    def md_append(self, job_id: str, estimate_minutes: int = None, md_file: str = None):
+    def md_append(self, job_id: str, estimate_minutes: Optional[int] = None, md_file: str = None):
         """Append a formatted session block to a TIME-TRACKING.md file."""
         if estimate_minutes is not None and estimate_minutes <= 0:
             raise ValueError(f"estimate_minutes must be positive, got {estimate_minutes}")
@@ -367,13 +367,33 @@ class TimeTracker:
         if estimate_minutes is not None:
             self._persist_estimate(job_id, estimate_minutes)
 
-        content = ""
+        # Read existing content and write the updated file atomically under a single lock.
+        # Using "r+" mode ensures the lock is held across both the read and the
+        # subsequent atomic rename, eliminating the TOCTOU window that separate
+        # read-lock / write-lock calls would introduce.
+        md_dir = os.path.dirname(os.path.abspath(md_file))
         if os.path.exists(md_file):
-            with _sessions_file_lock(md_file, "r") as f:
+            with _sessions_file_lock(md_file, "r+") as f:
                 content = f.read()
-
-        with _sessions_file_lock(md_file, "w") as f:
-            f.write(self._insert_block_into_content(content, block))
+                new_content = self._insert_block_into_content(content, block)
+                tmp_fd, tmp_path = tempfile.mkstemp(dir=md_dir)
+                try:
+                    with os.fdopen(tmp_fd, "w") as tmp:
+                        tmp.write(new_content)
+                    os.replace(tmp_path, md_file)
+                except Exception:
+                    os.unlink(tmp_path)
+                    raise
+        else:
+            new_content = self._insert_block_into_content("", block)
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=md_dir)
+            try:
+                with os.fdopen(tmp_fd, "w") as tmp:
+                    tmp.write(new_content)
+                os.replace(tmp_path, md_file)
+            except Exception:
+                os.unlink(tmp_path)
+                raise
 
         print(f"Appended session block for '{job_id}' to {md_file}")
 
@@ -400,7 +420,7 @@ class TimeTracker:
                         pass
             for s in sessions:
                 if (s["job_id"] == job_id and s.get("status") == "completed"
-                        and not s.get("estimated_minutes")):
+                        and s.get("estimated_minutes") is None):
                     s["estimated_minutes"] = estimate_minutes
             dir_name = os.path.dirname(os.path.abspath(self.sessions_file))
             tmp_fd, tmp_path = tempfile.mkstemp(dir=dir_name)

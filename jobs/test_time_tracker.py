@@ -97,7 +97,7 @@ def test_md_append_negative_variance(tmp_path):
     t.md_append("job6", estimate_minutes=20, md_file=md_file)
     content = open(md_file).read()
     assert "Variance" in content
-    assert "-" in content  # negative variance present
+    assert "-75%" in content  # 5 min actual vs 20 min estimate = -75%
 
 
 def test_md_append_persists_estimate_to_sessions(tmp_path):
