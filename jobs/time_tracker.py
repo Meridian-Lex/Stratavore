@@ -8,16 +8,35 @@ Sessions file location (in priority order):
   2. ~/meridian-home/lex-internal/state/time_sessions.jsonl (default)
 """
 
+import fcntl
 import json
 import os
 import sys
+import tempfile
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 DEFAULT_SESSIONS_FILE = os.path.expanduser(
     "~/meridian-home/lex-internal/state/time_sessions.jsonl"
 )
+
+VALID_SIZES = {"XS", "S", "M", "L", "XL"}
+VALID_COMPLEXITY = {"Low", "Medium", "High"}
+
+
+# ── File Locking Helpers ──────────────────────────────────────────────────────
+
+@contextmanager
+def _sessions_file_lock(path, mode):
+    """Context manager for exclusive file locking using fcntl."""
+    with open(path, mode) as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            yield f
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 class TimeTracker:
@@ -34,13 +53,13 @@ class TimeTracker:
     # ── Session I/O ──────────────────────────────────────────────────────────
 
     def _append_session(self, session: Dict):
-        with open(self.sessions_file, "a") as f:
+        with _sessions_file_lock(self.sessions_file, "a") as f:
             f.write(json.dumps(session) + "\n")
 
     def _load_sessions(self) -> List[Dict]:
         sessions = []
         try:
-            with open(self.sessions_file, "r") as f:
+            with _sessions_file_lock(self.sessions_file, "r") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -54,7 +73,7 @@ class TimeTracker:
         return sessions
 
     def _save_sessions(self, sessions: List[Dict]):
-        with open(self.sessions_file, "w") as f:
+        with _sessions_file_lock(self.sessions_file, "w") as f:
             for session in sessions:
                 f.write(json.dumps(session) + "\n")
 
@@ -66,8 +85,14 @@ class TimeTracker:
 
     # ── Core Commands ─────────────────────────────────────────────────────────
 
-    def start_session(self, job_id: str, agent: str, description: str = "") -> str:
+    def start_session(self, job_id: str, agent: str, description: str = "",
+                      size: Optional[str] = None, complexity: Optional[str] = None) -> str:
         """Start a new work session."""
+        if size is not None and size not in VALID_SIZES:
+            raise ValueError(f"Invalid size '{size}'. Valid: {sorted(VALID_SIZES)}")
+        if complexity is not None and complexity not in VALID_COMPLEXITY:
+            raise ValueError(f"Invalid complexity '{complexity}'. Valid: {sorted(VALID_COMPLEXITY)}")
+
         # Warn if this job already has an active session
         active = [s for s in self._load_sessions()
                   if s["job_id"] == job_id and s["status"] == "active"]
@@ -85,6 +110,8 @@ class TimeTracker:
             "agent": agent,
             "description": description,
             "status": "active",
+            "size": size,
+            "complexity": complexity,
             "start_time": datetime.utcnow().isoformat() + "Z",
             "start_timestamp": now,
             "end_time": None,
@@ -280,6 +307,132 @@ class TimeTracker:
             for note in notes_lines:
                 print(f"  - {note}")
 
+    @staticmethod
+    def _build_md_block(sessions: list, job_id: str, estimate_minutes) -> str:
+        """Build a formatted markdown session block from completed sessions."""
+        sessions = sorted(sessions, key=lambda s: s["start_timestamp"])
+        first, last = sessions[0], sessions[-1]
+        total_seconds = sum(s["duration_seconds"] for s in sessions if s["duration_seconds"])
+        total_minutes = int(total_seconds / 60)
+        start_dt = datetime.fromisoformat(first["start_time"].rstrip("Z"))
+        end_dt = datetime.fromisoformat(last["end_time"].rstrip("Z"))
+        notes_lines = [s["notes"] for s in sessions if s.get("notes")]
+        size = last.get("size") or first.get("size")
+        complexity = last.get("complexity") or first.get("complexity")
+
+        lines = [f"### Session: {job_id} ({start_dt.strftime('%Y-%m-%d')})"]
+        if estimate_minutes is not None:
+            lines.append(f"- **Estimate**: {estimate_minutes} minutes")
+        lines.append(f"- **Actual**: {total_minutes} minutes ({timedelta(seconds=int(total_seconds))})")
+        if estimate_minutes is not None and estimate_minutes > 0:
+            variance_pct = int(((total_minutes - estimate_minutes) / estimate_minutes) * 100)
+            sign = "+" if variance_pct >= 0 else ""
+            lines.append(f"- **Variance**: {sign}{variance_pct}%")
+        if size:
+            lines.append(f"- **Size**: {size}")
+        if complexity:
+            lines.append(f"- **Complexity**: {complexity}")
+        lines.append(f"- **Started**: {start_dt.strftime('%Y-%m-%d %H:%M:%S')} UTC")
+        lines.append(f"- **Completed**: {end_dt.strftime('%Y-%m-%d %H:%M:%S')} UTC")
+        if notes_lines:
+            lines.append(f"- **Notes**: {'; '.join(notes_lines)}")
+        return "\n".join(lines) + "\n"
+
+    @staticmethod
+    def _insert_block_into_content(content: str, block: str) -> str:
+        """Insert block before trailing --- separator, or append to end."""
+        if content.rstrip().endswith("---"):
+            idx = content.rfind("\n---")
+            if idx == -1:
+                idx = content.find("---")
+            return content[:idx] + "\n\n" + block + content[idx:]
+        return content.rstrip("\n") + "\n\n" + block
+
+    def md_append(self, job_id: str, estimate_minutes: Optional[int] = None, md_file: str = None):
+        """Append a formatted session block to a TIME-TRACKING.md file."""
+        if estimate_minutes is not None and estimate_minutes <= 0:
+            raise ValueError(f"estimate_minutes must be positive, got {estimate_minutes}")
+
+        if md_file is None:
+            md_file = os.path.expanduser("~/meridian-home/lex-internal/state/TIME-TRACKING.md")
+
+        sessions = [s for s in self._load_sessions()
+                    if s["job_id"] == job_id and s["status"] == "completed"]
+        if not sessions:
+            print(f"[ERR] No completed sessions for job '{job_id}'.")
+            return
+
+        block = self._build_md_block(sessions, job_id, estimate_minutes)
+
+        if estimate_minutes is not None:
+            self._persist_estimate(job_id, estimate_minutes)
+
+        # Read existing content and write the updated file atomically under a single lock.
+        # Using "r+" mode ensures the lock is held across both the read and the
+        # subsequent atomic rename, eliminating the TOCTOU window that separate
+        # read-lock / write-lock calls would introduce.
+        md_dir = os.path.dirname(os.path.abspath(md_file))
+        if os.path.exists(md_file):
+            with _sessions_file_lock(md_file, "r+") as f:
+                content = f.read()
+                new_content = self._insert_block_into_content(content, block)
+                tmp_fd, tmp_path = tempfile.mkstemp(dir=md_dir)
+                try:
+                    with os.fdopen(tmp_fd, "w") as tmp:
+                        tmp.write(new_content)
+                    os.replace(tmp_path, md_file)
+                except Exception:
+                    os.unlink(tmp_path)
+                    raise
+        else:
+            new_content = self._insert_block_into_content("", block)
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=md_dir)
+            try:
+                with os.fdopen(tmp_fd, "w") as tmp:
+                    tmp.write(new_content)
+                os.replace(tmp_path, md_file)
+            except Exception:
+                os.unlink(tmp_path)
+                raise
+
+        print(f"Appended session block for '{job_id}' to {md_file}")
+
+    def _persist_estimate(self, job_id: str, estimate_minutes: int) -> None:
+        """Write estimated_minutes into completed sessions for a job (for calibration).
+
+        Uses an exclusive file lock and atomic rename to avoid race conditions with
+        concurrent estimator.py annotate calls and to prevent data loss on interruption.
+        """
+        try:
+            f = open(self.sessions_file, "r+")
+        except FileNotFoundError:
+            return
+
+        with f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            sessions = []
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        sessions.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        pass
+            for s in sessions:
+                if (s["job_id"] == job_id and s.get("status") == "completed"
+                        and s.get("estimated_minutes") is None):
+                    s["estimated_minutes"] = estimate_minutes
+            dir_name = os.path.dirname(os.path.abspath(self.sessions_file))
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=dir_name)
+            try:
+                with os.fdopen(tmp_fd, "w") as tmp:
+                    for s in sessions:
+                        tmp.write(json.dumps(s) + "\n")
+                os.replace(tmp_path, self.sessions_file)
+            except Exception:
+                os.unlink(tmp_path)
+                raise
+
     # ── Internal Helpers ──────────────────────────────────────────────────────
 
     def _apply_resume(self, session: Dict) -> Dict:
@@ -325,7 +478,8 @@ Meridian Lex Time Tracker
 Usage: time_tracker.py <command> [args]
 
 Commands:
-  start <job_id> <agent> [description]  Start a new work session
+  start <job_id> <agent> [description] [--size XS|S|M|L|XL] [--complexity Low|Medium|High]
+                                        Start a new work session
   end   <session_id> [notes]            End an active session
   pause <session_id>                    Pause an active session
   resume <session_id>                   Resume a paused session
@@ -335,6 +489,8 @@ Commands:
   job   <job_id>                        Show cumulative time for a job
   all                                   Show stats for all jobs
   report <job_id>                       Generate TIME-TRACKING.md entry for a job
+  md-append <job_id> [--estimate N] [--file PATH]
+                                        Append session block to TIME-TRACKING.md
 
 Sessions file: {sessions_file}
 Override:      export LEX_TIME_SESSIONS=/path/to/file
@@ -352,10 +508,27 @@ def main():
 
     if cmd == "start":
         if len(sys.argv) < 4:
-            print("Usage: time_tracker.py start <job_id> <agent> [description]")
+            print("Usage: time_tracker.py start <job_id> <agent> [description] [--size S] [--complexity Medium]")
             return
-        tracker.start_session(sys.argv[2], sys.argv[3],
-                               sys.argv[4] if len(sys.argv) > 4 else "")
+        args = sys.argv[4:]
+        description = args[0] if args and not args[0].startswith("--") else ""
+        size = None
+        complexity = None
+        i = 1 if description else 0
+        while i < len(args):
+            if args[i] == "--size" and i + 1 < len(args):
+                size = args[i + 1]
+                i += 2
+            elif args[i] == "--complexity" and i + 1 < len(args):
+                complexity = args[i + 1]
+                i += 2
+            else:
+                i += 1
+        try:
+            tracker.start_session(sys.argv[2], sys.argv[3], description, size=size, complexity=complexity)
+        except ValueError as e:
+            print(f"[ERR] {e}")
+            return
 
     elif cmd == "end":
         if len(sys.argv) < 3:
@@ -398,6 +571,33 @@ def main():
             print("Usage: time_tracker.py report <job_id>")
             return
         tracker.generate_report(sys.argv[2])
+
+    elif cmd == "md-append":
+        if len(sys.argv) < 3:
+            print("Usage: time_tracker.py md-append <job_id> [--estimate N] [--file PATH]")
+            return
+        job_id = sys.argv[2]
+        estimate_minutes = None
+        md_file = None
+        i = 3
+        while i < len(sys.argv):
+            if sys.argv[i] == "--estimate" and i + 1 < len(sys.argv):
+                try:
+                    estimate_minutes = int(sys.argv[i + 1])
+                except ValueError:
+                    print(f"[ERR] --estimate requires an integer, got: '{sys.argv[i + 1]}'")
+                    return
+                i += 2
+            elif sys.argv[i] == "--file" and i + 1 < len(sys.argv):
+                md_file = sys.argv[i + 1]
+                i += 2
+            else:
+                i += 1
+        try:
+            tracker.md_append(job_id, estimate_minutes=estimate_minutes, md_file=md_file)
+        except ValueError as e:
+            print(f"[ERR] {e}")
+            return
 
     else:
         print(f"[ERR] Unknown command: '{cmd}'")
