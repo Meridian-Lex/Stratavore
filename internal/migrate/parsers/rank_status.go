@@ -158,6 +158,9 @@ func ParseRankFiles(statusPath, eventsPath string) (*V2RankStatusFile, error) {
 				Note:     ev.Note,
 			})
 		case "demotion":
+			if ev.Date == "" || ev.FromRank == "" || ev.ToRank == "" {
+				return nil, fmt.Errorf("rank-events.jsonl line %d: demotion missing required fields (date, from_rank, to_rank)", lineNum)
+			}
 			// Demotions appear in both rank_history and strike_history for full context.
 			// RankHistory records the resulting rank; StrikeHistory carries the full
 			// rationale including infraction, evidence, and ordered-by fields.
@@ -176,7 +179,11 @@ func ParseRankFiles(statusPath, eventsPath string) (*V2RankStatusFile, error) {
 				Note:        fmt.Sprintf("Demotion from %s to %s: %s / %s (ordered by %s)", ev.FromRank, ev.ToRank, ev.Infraction, ev.Consequence, ev.OrderedBy),
 			})
 		default:
-			return nil, fmt.Errorf("rank-events.jsonl line %d: unknown event type %q", lineNum, ev.Type)
+			// Unknown event types are skipped with a warning rather than aborting the
+			// parse. This allows forward-compatibility: new event types added to
+			// rank-events.jsonl before the parser is updated will not block sync,
+			// analyze, or import operations.
+			fmt.Fprintf(os.Stderr, "rank-events.jsonl line %d: skipping unknown event type %q\n", lineNum, ev.Type)
 		}
 	}
 

@@ -241,12 +241,20 @@ func TestParseRankFiles_DemotionEvidencePreserved(t *testing.T) {
 		t.Errorf("expected Evidence 'PR #13' on demotion StrikeEvent, got '%s'", rs.StrikeHistory[0].Evidence)
 	}
 
-	// Evidence should also surface in the emitted rank event
+	// Evidence must surface in the emitted demotion rank event.
+	// Assert the event exists and carries the correct Evidence field.
 	events := rs.GetRankEvents()
+	demotionEvents := 0
 	for _, ev := range events {
-		if ev.Type == "demotion" && ev.Evidence != "PR #13" {
-			t.Errorf("expected Evidence 'PR #13' on demotion rank event, got '%s'", ev.Evidence)
+		if ev.Type == "demotion" {
+			demotionEvents++
+			if ev.Evidence != "PR #13" {
+				t.Errorf("expected Evidence 'PR #13' on demotion rank event, got '%s'", ev.Evidence)
+			}
 		}
+	}
+	if demotionEvents != 1 {
+		t.Errorf("expected exactly 1 demotion rank event, got %d", demotionEvents)
 	}
 }
 
@@ -284,5 +292,54 @@ func TestGetRankEvents_InitialLabelWithLeadingDemotion(t *testing.T) {
 	}
 	if promotionCount != 1 {
 		t.Errorf("expected exactly 1 'promotion' event, got %d", promotionCount)
+	}
+}
+
+func TestParseRankFiles_UnknownEventTypeSkipped(t *testing.T) {
+	// Unknown event types must be skipped (logged to stderr) rather than
+	// aborting the parse. This preserves forward-compatibility when new
+	// event types are added to rank-events.jsonl before the parser is updated.
+	statusPath := writeTemp(t, "rank-status.json", `{"current_rank":"Ensign","strikes":0}`)
+	eventsPath := writeTemp(t, "rank-events.jsonl", `{"type":"commendation","date":"2026-02-09","achievement":"Good work","details":"Done","awarded_by":"Admiral","points":1}
+{"type":"future_event_type","date":"2026-03-01","some_field":"some_value"}
+`)
+
+	rs, err := ParseRankFiles(statusPath, eventsPath)
+	if err != nil {
+		t.Fatalf("ParseRankFiles should not error on unknown event type, got: %v", err)
+	}
+	if len(rs.Commendations) != 1 {
+		t.Errorf("expected 1 commendation (known events still parsed), got %d", len(rs.Commendations))
+	}
+}
+
+func TestParseRankFiles_DemotionMissingFields(t *testing.T) {
+	// A demotion event missing date, from_rank, or to_rank must return an error.
+	tests := []struct {
+		name  string
+		event string
+	}{
+		{
+			name:  "missing date",
+			event: `{"type":"demotion","from_rank":"Lieutenant","to_rank":"Lieutenant (JG)","infraction":"Violation","consequence":"Demotion"}`,
+		},
+		{
+			name:  "missing from_rank",
+			event: `{"type":"demotion","date":"2026-03-05","to_rank":"Lieutenant (JG)","infraction":"Violation","consequence":"Demotion"}`,
+		},
+		{
+			name:  "missing to_rank",
+			event: `{"type":"demotion","date":"2026-03-05","from_rank":"Lieutenant","infraction":"Violation","consequence":"Demotion"}`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			statusPath := writeTemp(t, "rank-status.json", `{"current_rank":"Ensign","strikes":0}`)
+			eventsPath := writeTemp(t, "rank-events.jsonl", tc.event+"\n")
+			_, err := ParseRankFiles(statusPath, eventsPath)
+			if err == nil {
+				t.Fatalf("expected error for demotion %s, got nil", tc.name)
+			}
+		})
 	}
 }
