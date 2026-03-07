@@ -126,3 +126,68 @@ def test_start_session_invalid_complexity(tmp_path):
     t = make_tracker(tmp_path)
     with pytest.raises(ValueError, match="Invalid complexity"):
         t.start_session("job9", "lex", complexity="Extreme")
+
+
+def test_md_append_multiple_sessions_aggregates(tmp_path):
+    """md_append sums durations and aggregates notes across multiple sessions for the same job."""
+    t = make_tracker(tmp_path)
+
+    # Inject two pre-built completed sessions directly to avoid same-second session_id collision
+    base_ts = 1000000.0
+    sessions = [
+        {
+            "session_id": "jobA_1000000",
+            "job_id": "jobA",
+            "agent": "lex",
+            "description": "first part",
+            "status": "completed",
+            "start_time": "2026-01-01T10:00:00Z",
+            "start_timestamp": base_ts,
+            "end_time": "2026-01-01T10:10:00Z",
+            "end_timestamp": base_ts + 600,
+            "duration_seconds": 600,
+            "paused_time": 0,
+            "pauses": [],
+            "notes": "first note",
+            "size": "S",
+            "complexity": "Low",
+            "estimated_minutes": None,
+            "created_at": "2026-01-01T10:00:00Z",
+        },
+        {
+            "session_id": "jobA_1000001",
+            "job_id": "jobA",
+            "agent": "lex",
+            "description": "second part",
+            "status": "completed",
+            "start_time": "2026-01-01T10:20:00Z",
+            "start_timestamp": base_ts + 1200,
+            "end_time": "2026-01-01T10:40:00Z",
+            "end_timestamp": base_ts + 2400,
+            "duration_seconds": 1200,
+            "paused_time": 0,
+            "pauses": [],
+            "notes": "second note",
+            "size": "M",
+            "complexity": "High",
+            "estimated_minutes": None,
+            "created_at": "2026-01-01T10:20:00Z",
+        },
+    ]
+    with open(t.sessions_file, "w") as f:
+        for s in sessions:
+            f.write(json.dumps(s) + "\n")
+
+    md_file = str(tmp_path / "MULTI.md")
+    open(md_file, "w").close()
+    t.md_append("jobA", estimate_minutes=40, md_file=md_file)
+    content = open(md_file).read()
+
+    # Total actual should be 30 minutes (10 + 20)
+    assert "30" in content
+    # Both notes should be aggregated into the block
+    assert "first note" in content
+    assert "second note" in content
+    # Size and complexity should reflect the last session (M/High)
+    assert "M" in content
+    assert "High" in content
