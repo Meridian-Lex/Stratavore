@@ -283,73 +283,78 @@ Complexity:  Low  Medium  High
 """
 
 
+def _cmd_estimate(argv: list) -> None:
+    if len(argv) < 4:
+        print("Usage: estimator.py estimate <size> <complexity>")
+        return
+    size, complexity = argv[2], argv[3]
+    try:
+        result = estimate(size, complexity)
+    except ValueError as e:
+        print(f"[ERR] {e}")
+        return
+    print(f"Size:              {result['size']} ({result['points']} points)")
+    print(f"Complexity:        {result['complexity']}")
+    print(f"Base minutes:      {result['base_minutes']}")
+    print(f"Variance factor:   {result['variance_correction']:.3f}  "
+          f"(confidence: {result['confidence']}, n={result['sample_count']})")
+    print(f"P50 (most likely): {result['p50_minutes']:.1f} min")
+    print(f"P80 (comfortable): {result['p80_minutes']:.1f} min")
+    print(f"P95 (worst case):  {result['p95_minutes']:.1f} min")
+
+
+def _cmd_history(argv: list) -> None:
+    size_filter = None
+    i = 2
+    while i < len(argv):
+        if argv[i] == "--size" and i + 1 < len(argv):
+            size_filter = argv[i + 1]
+            i += 2
+        else:
+            i += 1
+    history(size_filter=size_filter)
+
+
+def _cmd_annotate(argv: list) -> None:
+    if len(argv) < 5:
+        print("Usage: estimator.py annotate <session_id> --estimate N")
+        return
+    session_id = argv[2]
+    est = None
+    i = 3
+    while i < len(argv):
+        if argv[i] == "--estimate" and i + 1 < len(argv):
+            try:
+                est = int(argv[i + 1])
+            except ValueError:
+                print(f"[ERR] --estimate requires an integer, got: '{argv[i + 1]}'")
+                return
+            i += 2
+        else:
+            i += 1
+    if est is None:
+        print("[ERR] --estimate N required")
+        return
+    try:
+        annotate(session_id, est)
+    except ValueError as e:
+        print(f"[ERR] {e}")
+
+
 def main():
     if len(sys.argv) < 2:
         print(USAGE)
         return
 
     cmd = sys.argv[1]
-
     if cmd == "estimate":
-        if len(sys.argv) < 4:
-            print("Usage: estimator.py estimate <size> <complexity>")
-            return
-        size = sys.argv[2]
-        complexity = sys.argv[3]
-        try:
-            result = estimate(size, complexity)
-        except ValueError as e:
-            print(f"[ERR] {e}")
-            return
-        print(f"Size:              {result['size']} ({result['points']} points)")
-        print(f"Complexity:        {result['complexity']}")
-        print(f"Base minutes:      {result['base_minutes']}")
-        print(f"Variance factor:   {result['variance_correction']:.3f}  "
-              f"(confidence: {result['confidence']}, n={result['sample_count']})")
-        print(f"P50 (most likely): {result['p50_minutes']:.1f} min")
-        print(f"P80 (comfortable): {result['p80_minutes']:.1f} min")
-        print(f"P95 (worst case):  {result['p95_minutes']:.1f} min")
-
+        _cmd_estimate(sys.argv)
     elif cmd == "history":
-        size_filter = None
-        i = 2
-        while i < len(sys.argv):
-            if sys.argv[i] == "--size" and i + 1 < len(sys.argv):
-                size_filter = sys.argv[i + 1]
-                i += 2
-            else:
-                i += 1
-        history(size_filter=size_filter)
-
+        _cmd_history(sys.argv)
     elif cmd == "calibration":
         calibration()
-
     elif cmd == "annotate":
-        if len(sys.argv) < 5:
-            print("Usage: estimator.py annotate <session_id> --estimate N")
-            return
-        session_id = sys.argv[2]
-        est = None
-        i = 3
-        while i < len(sys.argv):
-            if sys.argv[i] == "--estimate" and i + 1 < len(sys.argv):
-                try:
-                    est = int(sys.argv[i + 1])
-                except ValueError:
-                    print(f"[ERR] --estimate requires an integer, got: '{sys.argv[i + 1]}'")
-                    return
-                i += 2
-            else:
-                i += 1
-        if est is None:
-            print("[ERR] --estimate N required")
-            return
-        try:
-            annotate(session_id, est)
-        except ValueError as e:
-            print(f"[ERR] {e}")
-            return
-
+        _cmd_annotate(sys.argv)
     else:
         print(f"[ERR] Unknown command: '{cmd}'")
         print(USAGE)
