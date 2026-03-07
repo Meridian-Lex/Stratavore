@@ -210,6 +210,33 @@ def calibration(sessions_file: str = DEFAULT_SESSIONS_FILE):
         print(f"{size:<6} {n:>8} {correction:>12.3f} {confidence:<12}")
 
 
+def _read_sessions(f) -> list:
+    """Parse JSONL lines from an open file, skipping blank lines and decode errors."""
+    sessions = []
+    for line in f:
+        line = line.strip()
+        if line:
+            try:
+                sessions.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+    return sessions
+
+
+def _atomic_write_sessions(sessions: list, sessions_file: str) -> None:
+    """Write sessions list to sessions_file atomically via a temp file."""
+    dir_name = os.path.dirname(os.path.abspath(sessions_file))
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=dir_name)
+    try:
+        with os.fdopen(tmp_fd, "w") as tmp:
+            for s in sessions:
+                tmp.write(json.dumps(s) + "\n")
+        os.replace(tmp_path, sessions_file)
+    except Exception:
+        os.unlink(tmp_path)
+        raise
+
+
 def annotate(session_id: str, estimated_minutes: int, sessions_file: str = DEFAULT_SESSIONS_FILE):
     """Retroactively add estimated_minutes to a session.
 
@@ -222,37 +249,15 @@ def annotate(session_id: str, estimated_minutes: int, sessions_file: str = DEFAU
 
     try:
         with _sessions_file_lock(sessions_file, "r+") as f:
-            sessions = []
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    sessions.append(json.loads(line))
-                except json.JSONDecodeError:
-                    pass
-
-            found = False
-            for s in sessions:
-                if s["session_id"] == session_id:
-                    s["estimated_minutes"] = estimated_minutes
-                    found = True
-                    break
+            sessions = _read_sessions(f)
+            found = any(s for s in sessions if s.get("session_id") == session_id)
             if not found:
                 print(f"[ERR] Session '{session_id}' not found.")
                 return
-
-            dir_name = os.path.dirname(os.path.abspath(sessions_file))
-            tmp_fd, tmp_path = tempfile.mkstemp(dir=dir_name)
-            try:
-                with os.fdopen(tmp_fd, "w") as tmp:
-                    for s in sessions:
-                        tmp.write(json.dumps(s) + "\n")
-                os.replace(tmp_path, sessions_file)
-            except Exception:
-                os.unlink(tmp_path)
-                raise
-
+            for s in sessions:
+                if s["session_id"] == session_id:
+                    s["estimated_minutes"] = estimated_minutes
+            _atomic_write_sessions(sessions, sessions_file)
     except FileNotFoundError:
         print(f"[ERR] Sessions file not found: {sessions_file}")
         return

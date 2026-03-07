@@ -307,42 +307,23 @@ class TimeTracker:
             for note in notes_lines:
                 print(f"  - {note}")
 
-    def md_append(self, job_id: str, estimate_minutes: int = None, md_file: str = None):
-        """Append a formatted session block to a TIME-TRACKING.md file."""
-        if estimate_minutes is not None and estimate_minutes <= 0:
-            raise ValueError(f"estimate_minutes must be positive, got {estimate_minutes}")
-
-        DEFAULT_MD = os.path.expanduser(
-            "~/meridian-home/lex-internal/state/TIME-TRACKING.md"
-        )
-        if md_file is None:
-            md_file = DEFAULT_MD
-
-        sessions = [s for s in self._load_sessions()
-                    if s["job_id"] == job_id and s["status"] == "completed"]
-        if not sessions:
-            print(f"[ERR] No completed sessions for job '{job_id}'.")
-            return
-
-        sessions.sort(key=lambda s: s["start_timestamp"])
-        first = sessions[0]
-        last = sessions[-1]
+    @staticmethod
+    def _build_md_block(sessions: list, job_id: str, estimate_minutes) -> str:
+        """Build a formatted markdown session block from completed sessions."""
+        sessions = sorted(sessions, key=lambda s: s["start_timestamp"])
+        first, last = sessions[0], sessions[-1]
         total_seconds = sum(s["duration_seconds"] for s in sessions if s["duration_seconds"])
-        total_duration = timedelta(seconds=int(total_seconds))
         total_minutes = int(total_seconds / 60)
-
         start_dt = datetime.fromisoformat(first["start_time"].rstrip("Z"))
         end_dt = datetime.fromisoformat(last["end_time"].rstrip("Z"))
-
         notes_lines = [s["notes"] for s in sessions if s.get("notes")]
         size = last.get("size") or first.get("size")
         complexity = last.get("complexity") or first.get("complexity")
 
-        date_str = start_dt.strftime("%Y-%m-%d")
-        lines = [f"### Session: {job_id} ({date_str})"]
+        lines = [f"### Session: {job_id} ({start_dt.strftime('%Y-%m-%d')})"]
         if estimate_minutes is not None:
             lines.append(f"- **Estimate**: {estimate_minutes} minutes")
-        lines.append(f"- **Actual**: {total_minutes} minutes ({total_duration})")
+        lines.append(f"- **Actual**: {total_minutes} minutes ({timedelta(seconds=int(total_seconds))})")
         if estimate_minutes is not None and estimate_minutes > 0:
             variance_pct = int(((total_minutes - estimate_minutes) / estimate_minutes) * 100)
             sign = "+" if variance_pct >= 0 else ""
@@ -355,30 +336,44 @@ class TimeTracker:
         lines.append(f"- **Completed**: {end_dt.strftime('%Y-%m-%d %H:%M:%S')} UTC")
         if notes_lines:
             lines.append(f"- **Notes**: {'; '.join(notes_lines)}")
-        block = "\n".join(lines) + "\n"
+        return "\n".join(lines) + "\n"
 
-        # Persist estimated_minutes back to session JSONL for calibration
-        if estimate_minutes is not None:
-            self._persist_estimate(job_id, estimate_minutes)
-
-        # Read existing content; insert before trailing --- if present
-        if os.path.exists(md_file):
-            with _sessions_file_lock(md_file, "r") as f:
-                content = f.read()
-        else:
-            content = ""
-
+    @staticmethod
+    def _insert_block_into_content(content: str, block: str) -> str:
+        """Insert block before trailing --- separator, or append to end."""
         if content.rstrip().endswith("---"):
-            # Insert block before the trailing ---
             idx = content.rfind("\n---")
             if idx == -1:
                 idx = content.find("---")
-            content = content[:idx] + "\n\n" + block + content[idx:]
-        else:
-            content = content.rstrip("\n") + "\n\n" + block
+            return content[:idx] + "\n\n" + block + content[idx:]
+        return content.rstrip("\n") + "\n\n" + block
+
+    def md_append(self, job_id: str, estimate_minutes: int = None, md_file: str = None):
+        """Append a formatted session block to a TIME-TRACKING.md file."""
+        if estimate_minutes is not None and estimate_minutes <= 0:
+            raise ValueError(f"estimate_minutes must be positive, got {estimate_minutes}")
+
+        if md_file is None:
+            md_file = os.path.expanduser("~/meridian-home/lex-internal/state/TIME-TRACKING.md")
+
+        sessions = [s for s in self._load_sessions()
+                    if s["job_id"] == job_id and s["status"] == "completed"]
+        if not sessions:
+            print(f"[ERR] No completed sessions for job '{job_id}'.")
+            return
+
+        block = self._build_md_block(sessions, job_id, estimate_minutes)
+
+        if estimate_minutes is not None:
+            self._persist_estimate(job_id, estimate_minutes)
+
+        content = ""
+        if os.path.exists(md_file):
+            with _sessions_file_lock(md_file, "r") as f:
+                content = f.read()
 
         with _sessions_file_lock(md_file, "w") as f:
-            f.write(content)
+            f.write(self._insert_block_into_content(content, block))
 
         print(f"Appended session block for '{job_id}' to {md_file}")
 
