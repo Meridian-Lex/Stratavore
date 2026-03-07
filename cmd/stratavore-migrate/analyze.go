@@ -79,13 +79,14 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  - Per-session target: %d\n", config.TokenBudget.PerSessionTarget)
 	fmt.Println()
 
-	// Parse rank-status.jsonl
-	rankPath := filepath.Join(v2Dir, "..", "directives", "rank-status.jsonl")
-	fmt.Printf("Reading %s...\n", rankPath)
+	// Parse rank-status.json + rank-events.jsonl
+	statusPath := filepath.Join(v2Dir, "..", "directives", "rank-status.json")
+	eventsPath := filepath.Join(v2Dir, "..", "directives", "rank-events.jsonl")
+	fmt.Printf("Reading %s + rank-events.jsonl...\n", statusPath)
 
-	rankStatus, err := parsers.ParseRankStatusFile(rankPath)
+	rankStatus, err := parsers.ParseRankFiles(statusPath, eventsPath)
 	if err != nil {
-		return fmt.Errorf("parse rank-status.jsonl: %w", err)
+		return fmt.Errorf("parse rank files: %w", err)
 	}
 
 	fmt.Printf("✓ Rank: %s (%s progress, %d strikes)\n",
