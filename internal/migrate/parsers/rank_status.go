@@ -168,16 +168,12 @@ func ParseRankFiles(statusPath, eventsPath string) (*V2RankStatusFile, error) {
 				Achieved: ev.Date,
 				Reason:   fmt.Sprintf("Demotion from %s: %s", ev.FromRank, ev.Infraction),
 			})
-			demotionNote := fmt.Sprintf("Demotion from %s to %s ordered by %s", ev.FromRank, ev.ToRank, ev.OrderedBy)
-			if ev.Evidence != "" {
-				demotionNote += fmt.Sprintf(". Evidence: %s", ev.Evidence)
-			}
 			status.StrikeHistory = append(status.StrikeHistory, V2StrikeEvent{
 				Date:        ev.Date,
 				Infraction:  ev.Infraction,
 				Evidence:    ev.Evidence,
 				Consequence: ev.Consequence,
-				Note:        demotionNote,
+				Note:        fmt.Sprintf("Demotion from %s to %s: %s / %s (ordered by %s)", ev.FromRank, ev.ToRank, ev.Infraction, ev.Consequence, ev.OrderedBy),
 			})
 		default:
 			return nil, fmt.Errorf("rank-events.jsonl line %d: unknown event type %q", lineNum, ev.Type)
