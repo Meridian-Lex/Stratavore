@@ -131,14 +131,15 @@ func runImport(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("  ✓ Parsed LEX-CONFIG.yaml: token budgets + quotas\n")
 
-	// Parse rank-status.jsonl
-	rankPath := filepath.Join(v2Dir, "..", "directives", "rank-status.jsonl")
-	rankStatus, err := parsers.ParseRankStatusFile(rankPath)
+	// Parse rank-status.json + rank-events.jsonl
+	statusPath := filepath.Join(v2Dir, "..", "directives", "rank-status.json")
+	eventsPath := filepath.Join(v2Dir, "..", "directives", "rank-events.jsonl")
+	rankStatus, err := parsers.ParseRankFiles(statusPath, eventsPath)
 	if err != nil {
-		return fmt.Errorf("parse rank-status.jsonl: %w", err)
+		return fmt.Errorf("parse rank files: %w", err)
 	}
 	rankEvents := rankStatus.GetRankEvents()
-	fmt.Printf("  ✓ Parsed rank-status.jsonl: %d events\n", len(rankEvents))
+	fmt.Printf("  ✓ Parsed rank-status.json + rank-events.jsonl: %d events\n", len(rankEvents))
 
 	// Parse behavioral-directives.jsonl
 	directivesPath := filepath.Join(v2Dir, "..", "directives", "behavioral-directives.jsonl")
