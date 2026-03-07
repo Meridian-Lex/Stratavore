@@ -3,7 +3,6 @@
 
 import json
 import time as t
-import io
 import pytest
 from estimator import estimate, history, calibration, annotate, BASE_MINUTES, COMPLEXITY_MULT
 
@@ -51,14 +50,14 @@ def test_variance_correction_applied(tmp_path):
 
 
 def test_invalid_size_raises():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Invalid size"):
         estimate("XXL", "Medium")
 
 
 def test_invalid_complexity_raises(tmp_path):
     sf = str(tmp_path / "e.jsonl")
     open(sf, "w").close()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Invalid complexity"):
         estimate("M", "Extreme", sessions_file=sf)
 
 
@@ -164,7 +163,7 @@ def test_calibration_output(tmp_path, capsys):
         assert size in captured.out
     # M has 4 samples and ratio=0.5 → correction near 0.5
     lines = captured.out.strip().splitlines()
-    m_line = next(l for l in lines if l.startswith("M"))
+    m_line = next(line for line in lines if line.startswith("M"))
     assert "0.500" in m_line
 
 
@@ -205,7 +204,7 @@ def test_annotate_does_not_clobber_other_sessions(tmp_path):
     annotate(s0["session_id"], 99, sessions_file=sf)
 
     with open(sf) as f:
-        lines = [json.loads(l) for l in f if l.strip()]
+        lines = [json.loads(line) for line in f if line.strip()]
     target = next(s for s in lines if s["session_id"] == s0["session_id"])
     other = next(s for s in lines if s["session_id"] == s1["session_id"])
     assert target["estimated_minutes"] == 99

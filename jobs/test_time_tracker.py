@@ -17,7 +17,7 @@ def make_tracker(tmp_path):
 
 def test_start_with_metadata(tmp_path):
     t = make_tracker(tmp_path)
-    sid = t.start_session("job1", "lex", "fix parser", size="M", complexity="High")
+    _ = t.start_session("job1", "lex", "fix parser", size="M", complexity="High")
     sessions = t._load_sessions()
     assert sessions[-1]["size"] == "M"
     assert sessions[-1]["complexity"] == "High"

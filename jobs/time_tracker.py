@@ -12,6 +12,7 @@ import fcntl
 import json
 import os
 import sys
+import tempfile
 import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -85,7 +86,7 @@ class TimeTracker:
     # ── Core Commands ─────────────────────────────────────────────────────────
 
     def start_session(self, job_id: str, agent: str, description: str = "",
-                      size: str = None, complexity: str = None) -> str:
+                      size: Optional[str] = None, complexity: Optional[str] = None) -> str:
         """Start a new work session."""
         if size is not None and size not in VALID_SIZES:
             raise ValueError(f"Invalid size '{size}'. Valid: {sorted(VALID_SIZES)}")
@@ -370,6 +371,8 @@ class TimeTracker:
         if content.rstrip().endswith("---"):
             # Insert block before the trailing ---
             idx = content.rfind("\n---")
+            if idx == -1:
+                idx = content.find("---")
             content = content[:idx] + "\n\n" + block + content[idx:]
         else:
             content = content.rstrip("\n") + "\n\n" + block
@@ -380,12 +383,40 @@ class TimeTracker:
         print(f"Appended session block for '{job_id}' to {md_file}")
 
     def _persist_estimate(self, job_id: str, estimate_minutes: int) -> None:
-        """Write estimated_minutes into completed sessions for a job (for calibration)."""
-        sessions = self._load_sessions()
-        for s in sessions:
-            if s["job_id"] == job_id and s.get("status") == "completed" and not s.get("estimated_minutes"):
-                s["estimated_minutes"] = estimate_minutes
-        self._save_sessions(sessions)
+        """Write estimated_minutes into completed sessions for a job (for calibration).
+
+        Uses an exclusive file lock and atomic rename to avoid race conditions with
+        concurrent estimator.py annotate calls and to prevent data loss on interruption.
+        """
+        try:
+            f = open(self.sessions_file, "r+")
+        except FileNotFoundError:
+            return
+
+        with f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            sessions = []
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        sessions.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        pass
+            for s in sessions:
+                if (s["job_id"] == job_id and s.get("status") == "completed"
+                        and not s.get("estimated_minutes")):
+                    s["estimated_minutes"] = estimate_minutes
+            dir_name = os.path.dirname(os.path.abspath(self.sessions_file))
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=dir_name)
+            try:
+                with os.fdopen(tmp_fd, "w") as tmp:
+                    for s in sessions:
+                        tmp.write(json.dumps(s) + "\n")
+                os.replace(tmp_path, self.sessions_file)
+            except Exception:
+                os.unlink(tmp_path)
+                raise
 
     # ── Internal Helpers ──────────────────────────────────────────────────────
 
@@ -471,9 +502,11 @@ def main():
         i = 1 if description else 0
         while i < len(args):
             if args[i] == "--size" and i + 1 < len(args):
-                size = args[i + 1]; i += 2
+                size = args[i + 1]
+                i += 2
             elif args[i] == "--complexity" and i + 1 < len(args):
-                complexity = args[i + 1]; i += 2
+                complexity = args[i + 1]
+                i += 2
             else:
                 i += 1
         try:
@@ -541,7 +574,8 @@ def main():
                     return
                 i += 2
             elif sys.argv[i] == "--file" and i + 1 < len(sys.argv):
-                md_file = sys.argv[i + 1]; i += 2
+                md_file = sys.argv[i + 1]
+                i += 2
             else:
                 i += 1
         try:
