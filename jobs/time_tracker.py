@@ -8,10 +8,12 @@ Sessions file location (in priority order):
   2. ~/meridian-home/lex-internal/state/time_sessions.jsonl (default)
 """
 
+import fcntl
 import json
 import os
 import sys
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
@@ -21,6 +23,19 @@ DEFAULT_SESSIONS_FILE = os.path.expanduser(
 
 VALID_SIZES = {"XS", "S", "M", "L", "XL"}
 VALID_COMPLEXITY = {"Low", "Medium", "High"}
+
+
+# ── File Locking Helpers ──────────────────────────────────────────────────────
+
+@contextmanager
+def _sessions_file_lock(path, mode):
+    """Context manager for exclusive file locking using fcntl."""
+    with open(path, mode) as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            yield f
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 class TimeTracker:
@@ -37,13 +52,13 @@ class TimeTracker:
     # ── Session I/O ──────────────────────────────────────────────────────────
 
     def _append_session(self, session: Dict):
-        with open(self.sessions_file, "a") as f:
+        with _sessions_file_lock(self.sessions_file, "a") as f:
             f.write(json.dumps(session) + "\n")
 
     def _load_sessions(self) -> List[Dict]:
         sessions = []
         try:
-            with open(self.sessions_file, "r") as f:
+            with _sessions_file_lock(self.sessions_file, "r") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -57,7 +72,7 @@ class TimeTracker:
         return sessions
 
     def _save_sessions(self, sessions: List[Dict]):
-        with open(self.sessions_file, "w") as f:
+        with _sessions_file_lock(self.sessions_file, "w") as f:
             for session in sessions:
                 f.write(json.dumps(session) + "\n")
 
@@ -344,7 +359,7 @@ class TimeTracker:
 
         # Read existing content; insert before trailing --- if present
         if os.path.exists(md_file):
-            with open(md_file) as f:
+            with _sessions_file_lock(md_file, "r") as f:
                 content = f.read()
         else:
             content = ""
@@ -356,7 +371,7 @@ class TimeTracker:
         else:
             content = content.rstrip("\n") + "\n\n" + block
 
-        with open(md_file, "w") as f:
+        with _sessions_file_lock(md_file, "w") as f:
             f.write(content)
 
         print(f"Appended session block for '{job_id}' to {md_file}")

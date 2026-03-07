@@ -15,6 +15,7 @@ import json
 import os
 import sys
 import tempfile
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Optional
 
@@ -31,6 +32,20 @@ POINTS = {"XS": 1, "S": 2, "M": 3, "L": 5, "XL": 8}
 
 MIN_SAMPLES_FOR_CORRECTION = 3
 WINDOW_SIZE = 10  # last N sessions used for variance correction
+TAIL_SAMPLE_SIZE = 30  # tail sample for empirical p95/p80 percentile calculation
+
+
+# ── File Locking Helpers ──────────────────────────────────────────────────────
+
+@contextmanager
+def _sessions_file_lock(path, mode):
+    """Context manager for exclusive file locking using fcntl."""
+    with open(path, mode) as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            yield f
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 # ── Core Logic ────────────────────────────────────────────────────────────────
@@ -96,16 +111,21 @@ def estimate(size: str, complexity: str, sessions_file: str = DEFAULT_SESSIONS_F
     p50 = base * mult * variance_correction
 
     # P80 and P95: empirical ratios from the ratio distribution if enough samples,
-    # else fixed multipliers.  Both are multiplied by base * mult (not base * mult * correction)
+    # else fixed multipliers. For percentile calculation, use TAIL_SAMPLE_SIZE
+    # (decoupled from WINDOW_SIZE used for variance correction) to ensure sufficient data.
+    # Both are multiplied by base * mult (not base * mult * correction)
     # so they represent the complexity-adjusted tail, not the mean-corrected value.
-    if sample_count >= 20:
-        ratios = sorted(r["duration_seconds"] / 60 / r["estimated_minutes"] for r in window)
+    tail_window = matching[-TAIL_SAMPLE_SIZE:]
+    tail_sample_count = len(tail_window)
+
+    if tail_sample_count >= 20:
+        ratios = sorted(s["duration_seconds"] / 60 / s["estimated_minutes"] for s in tail_window)
         p80_idx = int(len(ratios) * 0.80)
         p95_idx = int(len(ratios) * 0.95)
         p80 = base * mult * ratios[min(p80_idx, len(ratios) - 1)]
         p95 = base * mult * ratios[min(p95_idx, len(ratios) - 1)]
-    elif sample_count >= 10:
-        ratios = sorted(r["duration_seconds"] / 60 / r["estimated_minutes"] for r in window)
+    elif tail_sample_count >= 10:
+        ratios = sorted(s["duration_seconds"] / 60 / s["estimated_minutes"] for s in tail_window)
         p80_idx = int(len(ratios) * 0.80)
         p80 = base * mult * ratios[min(p80_idx, len(ratios) - 1)]
         p95 = p50 * 2.5
@@ -192,47 +212,49 @@ def calibration(sessions_file: str = DEFAULT_SESSIONS_FILE):
 def annotate(session_id: str, estimated_minutes: int, sessions_file: str = DEFAULT_SESSIONS_FILE):
     """Retroactively add estimated_minutes to a session.
 
+    Validates that estimated_minutes > 0 before modifying the sessions file.
     Uses an exclusive file lock and atomic rename to prevent data loss when
     time_tracker.py appends to the same file concurrently.
     """
+    if estimated_minutes <= 0:
+        raise ValueError(f"estimated_minutes must be positive, got {estimated_minutes}")
+
     try:
-        f = open(sessions_file, "r+")
+        with _sessions_file_lock(sessions_file, "r+") as f:
+            sessions = []
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    sessions.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+
+            found = False
+            for s in sessions:
+                if s["session_id"] == session_id:
+                    s["estimated_minutes"] = estimated_minutes
+                    found = True
+                    break
+            if not found:
+                print(f"[ERR] Session '{session_id}' not found.")
+                return
+
+            dir_name = os.path.dirname(os.path.abspath(sessions_file))
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=dir_name)
+            try:
+                with os.fdopen(tmp_fd, "w") as tmp:
+                    for s in sessions:
+                        tmp.write(json.dumps(s) + "\n")
+                os.replace(tmp_path, sessions_file)
+            except Exception:
+                os.unlink(tmp_path)
+                raise
+
     except FileNotFoundError:
         print(f"[ERR] Sessions file not found: {sessions_file}")
         return
-
-    with f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        sessions = []
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                sessions.append(json.loads(line))
-            except json.JSONDecodeError:
-                pass
-
-        found = False
-        for s in sessions:
-            if s["session_id"] == session_id:
-                s["estimated_minutes"] = estimated_minutes
-                found = True
-                break
-        if not found:
-            print(f"[ERR] Session '{session_id}' not found.")
-            return
-
-        dir_name = os.path.dirname(os.path.abspath(sessions_file))
-        tmp_fd, tmp_path = tempfile.mkstemp(dir=dir_name)
-        try:
-            with os.fdopen(tmp_fd, "w") as tmp:
-                for s in sessions:
-                    tmp.write(json.dumps(s) + "\n")
-            os.replace(tmp_path, sessions_file)
-        except Exception:
-            os.unlink(tmp_path)
-            raise
 
     print(f"Annotated '{session_id}' with estimated_minutes={estimated_minutes}")
 
