@@ -337,7 +337,11 @@ def main():
         if est is None:
             print("[ERR] --estimate N required")
             return
-        annotate(session_id, est)
+        try:
+            annotate(session_id, est)
+        except ValueError as e:
+            print(f"[ERR] {e}")
+            return
 
     else:
         print(f"[ERR] Unknown command: '{cmd}'")

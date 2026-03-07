@@ -308,6 +308,9 @@ class TimeTracker:
 
     def md_append(self, job_id: str, estimate_minutes: int = None, md_file: str = None):
         """Append a formatted session block to a TIME-TRACKING.md file."""
+        if estimate_minutes is not None and estimate_minutes <= 0:
+            raise ValueError(f"estimate_minutes must be positive, got {estimate_minutes}")
+
         DEFAULT_MD = os.path.expanduser(
             "~/meridian-home/lex-internal/state/TIME-TRACKING.md"
         )
@@ -473,7 +476,11 @@ def main():
                 complexity = args[i + 1]; i += 2
             else:
                 i += 1
-        tracker.start_session(sys.argv[2], sys.argv[3], description, size=size, complexity=complexity)
+        try:
+            tracker.start_session(sys.argv[2], sys.argv[3], description, size=size, complexity=complexity)
+        except ValueError as e:
+            print(f"[ERR] {e}")
+            return
 
     elif cmd == "end":
         if len(sys.argv) < 3:
@@ -537,7 +544,11 @@ def main():
                 md_file = sys.argv[i + 1]; i += 2
             else:
                 i += 1
-        tracker.md_append(job_id, estimate_minutes=estimate_minutes, md_file=md_file)
+        try:
+            tracker.md_append(job_id, estimate_minutes=estimate_minutes, md_file=md_file)
+        except ValueError as e:
+            print(f"[ERR] {e}")
+            return
 
     else:
         print(f"[ERR] Unknown command: '{cmd}'")
