@@ -37,7 +37,7 @@ func getAPIClient() *client.Client {
 }
 
 var (
-	Version   = "1.7.1"
+	Version   = "1.7.2"
 	BuildTime = "unknown"
 	Commit    = "unknown"
 )
