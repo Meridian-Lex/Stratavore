@@ -2,6 +2,12 @@
 /bin/
 /dist/
 
+# Built migration binary
+stratavore-migrate
+
+# Runtime data
+time_sessions.jsonl
+
 *.pyc
 # IDENTITY-EXCEPTION: functional internal reference — not for public exposure
 .claude/
