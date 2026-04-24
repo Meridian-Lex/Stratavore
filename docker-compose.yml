@@ -166,7 +166,7 @@ services:
 
   # nginx Reverse Proxy (unified ingress)
   nginx:
-    image: nginx:1.29-alpine
+    image: nginx:1.30-alpine
     container_name: stratavore-nginx
     ports:
       - "8080:80"     # Unified HTTP ingress
