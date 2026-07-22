@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # RabbitMQ message broker
   rabbitmq:
-    image: rabbitmq:3.13-management-alpine
+    image: rabbitmq:4.1-management-alpine
     container_name: stratavore-rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: guest
