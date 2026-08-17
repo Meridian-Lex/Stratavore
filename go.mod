@@ -11,7 +11,7 @@ require (
 	github.com/rabbitmq/amqp091-go v1.13.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
-	github.com/stretchr/testify v1.11.1
+	github.com/stretchr/testify v1.12.0
 	go.uber.org/zap v1.28.0
 	google.golang.org/grpc v1.83.0
 )
