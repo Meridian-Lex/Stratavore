@@ -7,7 +7,7 @@ version: '3.8'
 services:
   # Mock daemon (simple HTTP server for API testing)
   mock-daemon:
-    image: python:3.14-alpine
+    image: python:3.15-alpine
     container_name: stratavore-mock-daemon
     working_dir: /app
     command: python3 /app/mock-daemon.py
