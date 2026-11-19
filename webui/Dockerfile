@@ -1,6 +1,6 @@
 # Stratavore WebUI Container
 # Lightweight Python HTTP server for serving the modular control plane
-FROM python:3.14-alpine
+FROM python:3.15-alpine
 
 LABEL maintainer="Meridian Lex <lex@meridian-ops>"
 LABEL description="Stratavore Job Tracker WebUI v4 - Browser-based control plane"
